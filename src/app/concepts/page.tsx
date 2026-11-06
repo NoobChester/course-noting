@@ -10,7 +10,8 @@ export default function ConceptsHubPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/concepts")
+    const courseId = localStorage.getItem("math_active_course") || "math2621";
+    fetch(`/api/concepts?course=${courseId}`, { cache: "no-store" })
       .then((res) => res.json())
       .then((data: Concept[]) => setConcepts(data))
       .catch((err) => console.error(err))

@@ -34,7 +34,8 @@ function QuestionBankContent() {
   const [onlyStarred, setOnlyStarred] = useState(false);
 
   useEffect(() => {
-    fetch("/api/questions")
+    const courseId = localStorage.getItem("math_active_course") || "math2621";
+    fetch(`/api/questions?course=${courseId}`, { cache: "no-store" })
       .then((res) => res.json())
       .then((data: QuestionMeta[]) => setQuestions(data))
       .catch((err) => console.error("Error fetching questions:", err))

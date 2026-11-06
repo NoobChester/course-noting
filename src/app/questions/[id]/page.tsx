@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, use } from "react";
+import React, { useEffect, useState, use, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Question, QuestionStatus } from "@/lib/types";
@@ -45,9 +45,11 @@ export default function QuestionWorkspacePage({
   // Editable solution content
   const [solutionText, setSolutionText] = useState("");
   const [hintsText, setHintsText] = useState("");
+  const isInitialLoad = useRef(true);
 
   useEffect(() => {
-    fetch(`/api/questions/${id}`)
+    const courseId = localStorage.getItem("math_active_course") || "math2621";
+    fetch(`/api/questions/${id}?course=${courseId}`, { cache: "no-store" })
       .then((res) => {
         if (!res.ok) throw new Error("Not found");
         return res.json();
@@ -61,12 +63,39 @@ export default function QuestionWorkspacePage({
       .finally(() => setLoading(false));
   }, [id]);
 
+  // Debounced Autosave (1.2 seconds after you pause typing)
+  useEffect(() => {
+    if (isInitialLoad.current) {
+      if (question) isInitialLoad.current = false;
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      handleSave();
+    }, 1200);
+
+    return () => clearTimeout(timer);
+  }, [solutionText, hintsText]);
+
+  // Ctrl + S Keyboard Shortcut
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault();
+        handleSave();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [solutionText, hintsText, question]);
+
   const handleSave = async (updatedStatus?: QuestionStatus) => {
     if (!question) return;
 
     setSaving(true);
-    setSaveMessage("");
+    setSaveMessage("Saving...");
 
+    const courseId = localStorage.getItem("math_active_course") || "math2621";
     const newStatus = updatedStatus || question.status;
     const updatedPayload: Question = {
       ...question,
@@ -79,7 +108,7 @@ export default function QuestionWorkspacePage({
     };
 
     try {
-      const res = await fetch(`/api/questions/${id}`, {
+      const res = await fetch(`/api/questions/${id}?course=${courseId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updatedPayload)
@@ -88,7 +117,7 @@ export default function QuestionWorkspacePage({
       if (!res.ok) throw new Error("Failed to save");
 
       setQuestion(updatedPayload);
-      setSaveMessage("Saved!");
+      setSaveMessage("Saved to disk ✓");
 
       if (newStatus === "Mastered" && question.status !== "Mastered") {
         confetti({
@@ -98,9 +127,9 @@ export default function QuestionWorkspacePage({
         });
       }
 
-      setTimeout(() => setSaveMessage(""), 3000);
+      setTimeout(() => setSaveMessage(""), 2500);
     } catch (err) {
-      alert("Failed to save question");
+      setSaveMessage("Save failed");
       console.error(err);
     } finally {
       setSaving(false);
@@ -221,10 +250,14 @@ export default function QuestionWorkspacePage({
             type="button"
             onClick={() => handleSave()}
             disabled={saving}
-            className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm disabled:opacity-50 cursor-pointer"
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-sm disabled:opacity-50 cursor-pointer ${
+              saveMessage.includes("✓")
+                ? "bg-emerald-600 text-white"
+                : "bg-indigo-600 hover:bg-indigo-500 text-white"
+            }`}
           >
             <Save className="w-4 h-4" />
-            <span>{saving ? "Saving..." : saveMessage || "Save"}</span>
+            <span>{saving ? "Saving..." : saveMessage || "Save (Ctrl+S)"}</span>
           </button>
 
           {/* Next & Previous Navigation */}

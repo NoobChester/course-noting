@@ -24,9 +24,10 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    const courseId = localStorage.getItem("math_active_course") || "math2621";
     Promise.all([
-      fetch("/api/questions").then((res) => res.json()),
-      fetch("/api/concepts").then((res) => res.json())
+      fetch(`/api/questions?course=${courseId}`, { cache: "no-store" }).then((res) => res.json()),
+      fetch(`/api/concepts?course=${courseId}`, { cache: "no-store" }).then((res) => res.json())
     ])
       .then(([qData, cData]) => {
         setQuestions(qData);
