@@ -1,5 +1,16 @@
 export type QuestionStatus = "Unattempted" | "In Progress" | "Needs Review" | "Mastered";
 
+export interface CourseMeta {
+  id: string;
+  code: string;
+  name: string;
+  institution?: string;
+  term?: string;
+  logoSymbol?: string;
+  description?: string;
+  preset?: string;
+}
+
 export interface QuestionMeta {
   id: string;
   number: number;

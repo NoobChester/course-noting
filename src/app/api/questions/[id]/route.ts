@@ -8,7 +8,9 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const question = await getQuestionById(id);
+    const { searchParams } = new URL(req.url);
+    const courseId = searchParams.get("course") || "math2621";
+    const question = await getQuestionById(id, courseId);
     if (!question) {
       return NextResponse.json({ error: "Question not found" }, { status: 404 });
     }
@@ -24,9 +26,11 @@ export async function PUT(
 ) {
   try {
     const { id } = await params;
+    const { searchParams } = new URL(req.url);
+    const courseId = searchParams.get("course") || "math2621";
     const body: Question = await req.json();
 
-    const existing = await getQuestionById(id);
+    const existing = await getQuestionById(id, courseId);
     if (!existing) {
       return NextResponse.json({ error: "Question not found" }, { status: 404 });
     }
@@ -38,7 +42,7 @@ export async function PUT(
       updatedAt: new Date().toISOString()
     };
 
-    const success = await saveQuestion(updated);
+    const success = await saveQuestion(updated, courseId);
     if (!success) {
       return NextResponse.json({ error: "Failed to update question" }, { status: 500 });
     }

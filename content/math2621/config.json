@@ -1,0 +1,9 @@
+{
+  "code": "MATH2621",
+  "name": "Higher Complex Analysis",
+  "institution": "The University of New South Wales",
+  "term": "T3, 2026",
+  "logoSymbol": "∫dz",
+  "description": "All 131 problem sheet questions, connected theory cheat sheets, KaTeX solution workspace with handwritten image attachments, and timed mock exam preparation.",
+  "preset": "complex_analysis"
+}

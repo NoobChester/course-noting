@@ -1,10 +1,41 @@
 import fs from "fs/promises";
 import path from "path";
 import matter from "gray-matter";
-import { Question, QuestionContent, QuestionMeta, Concept, ConceptMeta } from "./types";
+import { Question, QuestionContent, QuestionMeta, Concept, ConceptMeta, CourseMeta } from "./types";
 
-const QUESTIONS_DIR = path.join(process.cwd(), "content", "questions");
-const CONCEPTS_DIR = path.join(process.cwd(), "content", "concepts");
+const CONTENT_DIR = path.join(process.cwd(), "content");
+const COURSES_FILE = path.join(CONTENT_DIR, "courses.json");
+
+export async function getAllRegisteredCourses(): Promise<CourseMeta[]> {
+  try {
+    const data = await fs.readFile(COURSES_FILE, "utf-8");
+    return JSON.parse(data);
+  } catch {
+    return [
+      {
+        id: "math2621",
+        code: "MATH2621",
+        name: "Higher Complex Analysis",
+        institution: "The University of New South Wales",
+        term: "T3, 2026",
+        logoSymbol: "∫dz",
+        preset: "complex_analysis"
+      }
+    ];
+  }
+}
+
+export function resolveQuestionsDir(courseId?: string): string {
+  const cid = (courseId || "math2621").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const coursePath = path.join(CONTENT_DIR, cid, "questions");
+  return coursePath;
+}
+
+export function resolveConceptsDir(courseId?: string): string {
+  const cid = (courseId || "math2621").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const coursePath = path.join(CONTENT_DIR, cid, "concepts");
+  return coursePath;
+}
 
 export function parseQuestionSections(body: string): QuestionContent {
   const sections: QuestionContent = {
@@ -15,7 +46,6 @@ export function parseQuestionSections(body: string): QuestionContent {
   };
 
   const parts = body.split(/<!--\s*split:(\w+)\s*-->/);
-  // Initial part before any split tag is prompt (or contains ### Prompt)
   let initial = parts[0] || "";
   sections.prompt = initial.replace(/^###\s*Prompt\s*/m, "").trim();
 
@@ -52,14 +82,22 @@ ${content.official.trim()}
 `;
 }
 
-export async function getAllQuestions(): Promise<QuestionMeta[]> {
+export async function getAllQuestions(courseId?: string): Promise<QuestionMeta[]> {
   try {
-    const files = await fs.readdir(QUESTIONS_DIR);
+    let dir = resolveQuestionsDir(courseId);
+    try {
+      await fs.access(dir);
+    } catch {
+      // Fallback to content/questions if migration in progress
+      dir = path.join(CONTENT_DIR, "questions");
+    }
+
+    const files = await fs.readdir(dir);
     const questions: QuestionMeta[] = [];
 
     for (const file of files) {
       if (!file.endsWith(".md")) continue;
-      const filePath = path.join(QUESTIONS_DIR, file);
+      const filePath = path.join(dir, file);
       const fileContent = await fs.readFile(filePath, "utf-8");
       const { data } = matter(fileContent);
 
@@ -89,12 +127,18 @@ export async function getAllQuestions(): Promise<QuestionMeta[]> {
   }
 }
 
-export async function getQuestionById(id: string): Promise<Question | null> {
+export async function getQuestionById(id: string, courseId?: string): Promise<Question | null> {
   try {
-    const filePath = path.join(QUESTIONS_DIR, `${id}.md`);
+    let dir = resolveQuestionsDir(courseId);
+    let filePath = path.join(dir, `${id}.md`);
+    try {
+      await fs.access(filePath);
+    } catch {
+      filePath = path.join(CONTENT_DIR, "questions", `${id}.md`);
+    }
+
     const fileContent = await fs.readFile(filePath, "utf-8");
     const { data, content } = matter(fileContent);
-
     const parsedContent = parseQuestionSections(content);
 
     return {
@@ -122,9 +166,11 @@ export async function getQuestionById(id: string): Promise<Question | null> {
   }
 }
 
-export async function saveQuestion(question: Question): Promise<boolean> {
+export async function saveQuestion(question: Question, courseId?: string): Promise<boolean> {
   try {
-    const filePath = path.join(QUESTIONS_DIR, `${question.id}.md`);
+    let dir = resolveQuestionsDir(courseId);
+    await fs.mkdir(dir, { recursive: true });
+    const filePath = path.join(dir, `${question.id}.md`);
     const serializedBody = serializeQuestionSections(question.content);
 
     const frontmatterData = {
@@ -154,15 +200,22 @@ export async function saveQuestion(question: Question): Promise<boolean> {
   }
 }
 
-export async function getAllConcepts(): Promise<Concept[]> {
+export async function getAllConcepts(courseId?: string): Promise<Concept[]> {
   try {
-    const files = await fs.readdir(CONCEPTS_DIR);
+    let dir = resolveConceptsDir(courseId);
+    try {
+      await fs.access(dir);
+    } catch {
+      dir = path.join(CONTENT_DIR, "concepts");
+    }
+
+    const files = await fs.readdir(dir);
     const concepts: Concept[] = [];
-    const allQuestions = await getAllQuestions();
+    const allQuestions = await getAllQuestions(courseId);
 
     for (const file of files) {
       if (!file.endsWith(".md")) continue;
-      const filePath = path.join(CONCEPTS_DIR, file);
+      const filePath = path.join(dir, file);
       const fileContent = await fs.readFile(filePath, "utf-8");
       const { data, content } = matter(fileContent);
 
@@ -190,13 +243,20 @@ export async function getAllConcepts(): Promise<Concept[]> {
   }
 }
 
-export async function getConceptBySlug(slug: string): Promise<Concept | null> {
+export async function getConceptBySlug(slug: string, courseId?: string): Promise<Concept | null> {
   try {
-    const filePath = path.join(CONCEPTS_DIR, `${slug}.md`);
+    let dir = resolveConceptsDir(courseId);
+    let filePath = path.join(dir, `${slug}.md`);
+    try {
+      await fs.access(filePath);
+    } catch {
+      filePath = path.join(CONTENT_DIR, "concepts", `${slug}.md`);
+    }
+
     const fileContent = await fs.readFile(filePath, "utf-8");
     const { data, content } = matter(fileContent);
 
-    const allQuestions = await getAllQuestions();
+    const allQuestions = await getAllQuestions(courseId);
     const linked = allQuestions
       .filter((q) => q.concepts.includes(slug))
       .map((q) => q.id);
