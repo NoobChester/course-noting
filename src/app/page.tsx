@@ -16,6 +16,7 @@ import {
   AlertCircle,
   Scissors
 } from "lucide-react";
+import { COURSE_CONFIG } from "@/course.config";
 
 export default function DashboardPage() {
   const [questions, setQuestions] = useState<QuestionMeta[]>([]);
@@ -67,15 +68,15 @@ export default function DashboardPage() {
         <div className="relative z-10 max-w-2xl space-y-4">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 text-indigo-400 text-xs font-semibold border border-indigo-500/20">
             <Flame className="w-3.5 h-3.5 text-indigo-400" />
-            <span>UNSW MATH2621 • Higher Complex Analysis</span>
+            <span>{COURSE_CONFIG.code} • {COURSE_CONFIG.name}</span>
           </div>
 
           <h1 className="text-3xl sm:text-4xl font-black text-white tracking-tight">
-            Master Every Contour, Singularity & Residue
+            {COURSE_CONFIG.name} Study Hub
           </h1>
 
           <p className="text-sm sm:text-base text-zinc-300 leading-relaxed">
-            All 131 problem sheet questions, connected theory cheat sheets, KaTeX solution workspace with handwritten image attachments, and timed mock exam preparation.
+            {COURSE_CONFIG.description}
           </p>
 
           <div className="pt-2 flex flex-wrap items-center gap-3">

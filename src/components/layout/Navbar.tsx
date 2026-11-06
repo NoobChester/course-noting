@@ -14,6 +14,7 @@ import {
   Sparkles
 } from "lucide-react";
 import { QuestionMeta } from "@/lib/types";
+import { COURSE_CONFIG } from "@/course.config";
 
 export function Navbar() {
   const pathname = usePathname();
@@ -49,17 +50,17 @@ export function Navbar() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         {/* Brand */}
         <Link href="/" className="flex items-center gap-2.5 group">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 text-white flex items-center justify-center font-bold font-mono text-sm shadow-md group-hover:scale-105 transition">
-            ∫dz
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 text-white flex items-center justify-center font-bold font-mono text-xs shadow-md group-hover:scale-105 transition">
+            {COURSE_CONFIG.logoSymbol}
           </div>
           <div>
             <div className="text-sm font-black tracking-tight text-zinc-100 flex items-center gap-1.5">
-              <span>MATH2621</span>
+              <span>{COURSE_CONFIG.code}</span>
               <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-indigo-950 text-indigo-400 border border-indigo-800">
                 Hub
               </span>
             </div>
-            <div className="text-[10px] text-zinc-400 font-medium">Higher Complex Analysis</div>
+            <div className="text-[10px] text-zinc-400 font-medium">{COURSE_CONFIG.name}</div>
           </div>
         </Link>
 

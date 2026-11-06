@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { MATH_SNIPPETS, MathSnippet } from "@/lib/math-snippets";
+import { COURSE_CONFIG } from "@/course.config";
 
 interface MathToolbarProps {
   onInsert: (snippet: string) => void;
@@ -9,13 +9,7 @@ interface MathToolbarProps {
 }
 
 export function MathToolbar({ onInsert, onUploadImageClick }: MathToolbarProps) {
-  const categories: MathSnippet["category"][] = [
-    "Integrals",
-    "Residues",
-    "Calculus",
-    "Fractions",
-    "Symbols"
-  ];
+  const snippets = COURSE_CONFIG.customSnippets;
 
   return (
     <div className="flex flex-wrap items-center gap-1.5 p-2 bg-zinc-900 border-b border-zinc-800 text-xs text-zinc-300">
@@ -23,7 +17,7 @@ export function MathToolbar({ onInsert, onUploadImageClick }: MathToolbarProps) 
         <span>⚡ Quick Insert:</span>
       </span>
 
-      {MATH_SNIPPETS.map((snippet) => (
+      {snippets.map((snippet) => (
         <button
           key={snippet.label}
           type="button"
