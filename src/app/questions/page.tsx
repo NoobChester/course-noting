@@ -29,6 +29,7 @@ function QuestionBankContent() {
   // Filters
   const [search, setSearch] = useState("");
   const [selectedTopic, setSelectedTopic] = useState(initialTopic);
+  const [selectedSource, setSelectedSource] = useState("");
   const [selectedStatus, setSelectedStatus] = useState(initialStatus);
   const [selectedWeek, setSelectedWeek] = useState("");
   const [onlyDifficult, setOnlyDifficult] = useState(false);
@@ -56,6 +57,15 @@ function QuestionBankContent() {
     return Array.from(set);
   }, [questions]);
 
+  // Extract all unique sources
+  const sources = useMemo(() => {
+    const set = new Set<string>();
+    questions.forEach((q) => {
+      if (q.source) set.add(q.source);
+    });
+    return Array.from(set);
+  }, [questions]);
+
   // Filtered list
   const filteredQuestions = useMemo(() => {
     return questions.filter((q) => {
@@ -64,13 +74,15 @@ function QuestionBankContent() {
         const matchesTitle = q.title.toLowerCase().includes(query);
         const matchesNum = q.number.toString().includes(query);
         const matchesTopic = q.topic.toLowerCase().includes(query);
+        const matchesSource = q.source ? q.source.toLowerCase().includes(query) : false;
         const matchesConcepts = q.concepts.some((c) => c.toLowerCase().includes(query));
-        if (!matchesTitle && !matchesNum && !matchesTopic && !matchesConcepts) {
+        if (!matchesTitle && !matchesNum && !matchesTopic && !matchesSource && !matchesConcepts) {
           return false;
         }
       }
 
       if (selectedTopic && q.topic !== selectedTopic) return false;
+      if (selectedSource && q.source !== selectedSource) return false;
       if (selectedStatus && q.status !== selectedStatus) return false;
       if (selectedWeek && q.week.toString() !== selectedWeek) return false;
       if (onlyDifficult && !q.isDifficult) return false;
@@ -78,7 +90,7 @@ function QuestionBankContent() {
 
       return true;
     });
-  }, [questions, search, selectedTopic, selectedStatus, selectedWeek, onlyDifficult, onlyStarred]);
+  }, [questions, search, selectedTopic, selectedSource, selectedStatus, selectedWeek, onlyDifficult, onlyStarred]);
 
   const toggleStar = async (e: React.MouseEvent, q: QuestionMeta) => {
     e.preventDefault();
@@ -194,10 +206,26 @@ function QuestionBankContent() {
               onChange={(e) => setSelectedTopic(e.target.value)}
               className="w-full px-3 py-1.5 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-300 focus:outline-none focus:border-indigo-500"
             >
-              <option value="">All Topics (22 Sections)</option>
+              <option value="">All Topics</option>
               {topics.map((t) => (
                 <option key={t} value={t}>
                   {t}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Source Dropdown */}
+          <div>
+            <select
+              value={selectedSource}
+              onChange={(e) => setSelectedSource(e.target.value)}
+              className="w-full px-3 py-1.5 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-300 focus:outline-none focus:border-indigo-500 font-medium"
+            >
+              <option value="">All Sources</option>
+              {sources.map((s) => (
+                <option key={s} value={s}>
+                  {s}
                 </option>
               ))}
             </select>
@@ -235,38 +263,40 @@ function QuestionBankContent() {
           </div>
 
           {/* Checkboxes: Difficult & Starred */}
-          <label className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-300 cursor-pointer hover:bg-zinc-900 transition">
-            <input
-              type="checkbox"
-              checked={onlyDifficult}
-              onChange={(e) => setOnlyDifficult(e.target.checked)}
-              className="rounded bg-zinc-800 text-indigo-600 border-zinc-700"
-            />
-            <span className="flex items-center gap-1">
-              <Flame className="w-3.5 h-3.5 text-amber-400" />
-              <span>Difficult (*)</span>
-            </span>
-          </label>
+          <div className="flex items-center gap-1.5 col-span-2 sm:col-span-1">
+            <label className="flex-1 flex items-center gap-1 px-2.5 py-1.5 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-300 cursor-pointer hover:bg-zinc-900 transition">
+              <input
+                type="checkbox"
+                checked={onlyDifficult}
+                onChange={(e) => setOnlyDifficult(e.target.checked)}
+                className="rounded bg-zinc-800 text-indigo-600 border-zinc-700"
+              />
+              <span className="flex items-center gap-0.5">
+                <Flame className="w-3.5 h-3.5 text-amber-400" />
+                <span>Hard</span>
+              </span>
+            </label>
 
-          <label className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-300 cursor-pointer hover:bg-zinc-900 transition">
-            <input
-              type="checkbox"
-              checked={onlyStarred}
-              onChange={(e) => setOnlyStarred(e.target.checked)}
-              className="rounded bg-zinc-800 text-indigo-600 border-zinc-700"
-            />
-            <span className="flex items-center gap-1">
-              <Star className="w-3.5 h-3.5 text-yellow-400 fill-yellow-400" />
-              <span>Starred</span>
-            </span>
-          </label>
+            <label className="flex-1 flex items-center gap-1 px-2.5 py-1.5 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-300 cursor-pointer hover:bg-zinc-900 transition">
+              <input
+                type="checkbox"
+                checked={onlyStarred}
+                onChange={(e) => setOnlyStarred(e.target.checked)}
+                className="rounded bg-zinc-800 text-indigo-600 border-zinc-700"
+              />
+              <span className="flex items-center gap-0.5">
+                <Star className="w-3.5 h-3.5 text-yellow-400 fill-yellow-400" />
+                <span>Star</span>
+              </span>
+            </label>
+          </div>
         </div>
       </div>
 
       {/* Question Cards List */}
       {loading ? (
         <div className="py-20 text-center text-zinc-500 text-sm animate-pulse">
-          Loading 131 MATH2621 questions...
+          Loading questions...
         </div>
       ) : filteredQuestions.length === 0 ? (
         <div className="py-16 text-center rounded-2xl border border-zinc-800 bg-zinc-900/40 p-8 space-y-3">
@@ -278,6 +308,7 @@ function QuestionBankContent() {
             onClick={() => {
               setSearch("");
               setSelectedTopic("");
+              setSelectedSource("");
               setSelectedStatus("");
               setSelectedWeek("");
               setOnlyDifficult(false);
@@ -303,6 +334,11 @@ function QuestionBankContent() {
                     <span className="px-2.5 py-0.5 rounded-md font-mono font-black text-xs bg-indigo-950 text-indigo-300 border border-indigo-800/80">
                       Q{q.number}
                     </span>
+                    {q.source && (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-zinc-800 text-zinc-300 border border-zinc-700">
+                        {q.source}
+                      </span>
+                    )}
                     <span className="text-[11px] font-medium text-zinc-400">
                       Week {q.week} • {q.topic}
                     </span>

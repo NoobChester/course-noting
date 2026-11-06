@@ -45,7 +45,20 @@ export default function QuestionWorkspacePage({
   // Editable solution content
   const [solutionText, setSolutionText] = useState("");
   const [hintsText, setHintsText] = useState("");
+  const [allQuestionIds, setAllQuestionIds] = useState<string[]>([]);
   const isInitialLoad = useRef(true);
+
+  useEffect(() => {
+    const courseId = localStorage.getItem("math_active_course") || "math2621";
+    fetch(`/api/questions?course=${courseId}`, { cache: "no-store" })
+      .then((res) => res.json())
+      .then((data: { id: string }[]) => {
+        if (Array.isArray(data)) {
+          setAllQuestionIds(data.map((q) => q.id));
+        }
+      })
+      .catch((err) => console.error(err));
+  }, []);
 
   useEffect(() => {
     const courseId = localStorage.getItem("math_active_course") || "math2621";
@@ -172,9 +185,10 @@ export default function QuestionWorkspacePage({
     );
   }
 
-  // Next / Prev numbers
-  const prevId = question.number > 1 ? `q-${String(question.number - 1).padStart(3, "0")}` : null;
-  const nextId = question.number < 131 ? `q-${String(question.number + 1).padStart(3, "0")}` : null;
+  // Dynamic Next / Prev navigation based on full question sequence
+  const currentIndex = allQuestionIds.indexOf(id);
+  const prevId = currentIndex > 0 ? allQuestionIds[currentIndex - 1] : null;
+  const nextId = currentIndex >= 0 && currentIndex < allQuestionIds.length - 1 ? allQuestionIds[currentIndex + 1] : null;
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">

@@ -152,7 +152,7 @@ export async function getAllQuestions(courseId?: string): Promise<QuestionMeta[]
       });
     }
 
-    return questions.sort((a, b) => a.number - b.number);
+    return questions.sort((a, b) => a.number - b.number || a.id.localeCompare(b.id));
   } catch (err) {
     console.error("Error reading questions:", err);
     return [];
