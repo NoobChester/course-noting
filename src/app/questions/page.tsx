@@ -14,7 +14,8 @@ import {
   ArrowRight,
   BookOpen,
   HelpCircle,
-  Flame
+  Flame,
+  FileText
 } from "lucide-react";
 
 function QuestionBankContent() {
@@ -89,7 +90,8 @@ function QuestionBankContent() {
     );
 
     try {
-      await fetch(`/api/questions/${q.id}`, {
+      const courseId = localStorage.getItem("math_active_course") || "math2621";
+      await fetch(`/api/questions/${q.id}?course=${courseId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ starred: updated })
@@ -149,9 +151,19 @@ function QuestionBankContent() {
         </div>
 
         <div className="flex items-center gap-2">
+          <a
+            href="/courses/MATH2621/MATH2621_Problems_2026-10-06-1.pdf"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold flex items-center gap-1.5 transition border border-zinc-700"
+            title="Open Master Problem Sheet (PDF)"
+          >
+            <FileText className="w-4 h-4 text-indigo-400" />
+            <span>Master PDF</span>
+          </a>
           <Link
             href="/exam"
-            className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold flex items-center gap-1.5 transition"
+            className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold flex items-center gap-1.5 transition border border-zinc-700"
           >
             <Clock className="w-4 h-4 text-amber-400" />
             <span>Start Practice Exam</span>

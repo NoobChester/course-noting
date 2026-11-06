@@ -142,7 +142,8 @@ export default function QuestionWorkspacePage({
     setQuestion({ ...question, starred: newStarred });
 
     try {
-      await fetch(`/api/questions/${id}`, {
+      const courseId = localStorage.getItem("math_active_course") || "math2621";
+      await fetch(`/api/questions/${id}?course=${courseId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...question, starred: newStarred })
