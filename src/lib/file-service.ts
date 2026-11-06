@@ -2,6 +2,7 @@ import fs from "fs/promises";
 import path from "path";
 import matter from "gray-matter";
 import { Question, QuestionContent, QuestionMeta, Concept, ConceptMeta, CourseMeta } from "./types";
+import { getUserCourseState, saveUserQuestionData } from "./user-service";
 
 const COURSES_BASE_DIR = path.join(process.cwd(), "courses");
 
@@ -123,9 +124,13 @@ ${content.official.trim()}
 
 export async function getAllQuestions(courseId?: string): Promise<QuestionMeta[]> {
   try {
-    const dir = await resolveQuestionsDir(courseId);
+    const cleanCourseId = (courseId || "math2621").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const dir = await resolveQuestionsDir(cleanCourseId);
     const files = await fs.readdir(dir);
     const questions: QuestionMeta[] = [];
+
+    // Load dedicated user progress (overlay)
+    const userState = await getUserCourseState(cleanCourseId);
 
     for (const file of files) {
       if (!file.endsWith(".md")) continue;
@@ -133,8 +138,11 @@ export async function getAllQuestions(courseId?: string): Promise<QuestionMeta[]
       const fileContent = await fs.readFile(filePath, "utf-8");
       const { data } = matter(fileContent);
 
+      const qId = data.id || file.replace(/\.md$/, "");
+      const userData = userState.questions[qId];
+
       questions.push({
-        id: data.id || file.replace(/\.md$/, ""),
+        id: qId,
         number: data.number || 0,
         title: data.title || "Untitled Question",
         week: data.week || 1,
@@ -142,13 +150,13 @@ export async function getAllQuestions(courseId?: string): Promise<QuestionMeta[]
         difficulty: data.difficulty || 2,
         isDifficult: Boolean(data.isDifficult),
         isNonExaminable: Boolean(data.isNonExaminable),
-        status: data.status || "Unattempted",
+        status: userData?.status || data.status || "Unattempted",
         concepts: Array.isArray(data.concepts) ? data.concepts : [],
         source: data.source || "",
-        snipUrl: data.snipUrl || "",
-        starred: Boolean(data.starred),
+        snipUrl: userData?.snipUrl || data.snipUrl || "",
+        starred: userData?.starred !== undefined ? Boolean(userData.starred) : Boolean(data.starred),
         createdAt: data.createdAt || new Date().toISOString(),
-        updatedAt: data.updatedAt || new Date().toISOString()
+        updatedAt: userData?.updatedAt || data.updatedAt || new Date().toISOString()
       });
     }
 
@@ -161,11 +169,25 @@ export async function getAllQuestions(courseId?: string): Promise<QuestionMeta[]
 
 export async function getQuestionById(id: string, courseId?: string): Promise<Question | null> {
   try {
-    const dir = await resolveQuestionsDir(courseId);
+    const cleanCourseId = (courseId || "math2621").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const dir = await resolveQuestionsDir(cleanCourseId);
     const filePath = path.join(dir, `${id}.md`);
     const fileContent = await fs.readFile(filePath, "utf-8");
     const { data, content } = matter(fileContent);
     const parsedContent = parseQuestionSections(content);
+
+    // Overlay personal student progress from dedicated userdata/
+    const userState = await getUserCourseState(cleanCourseId);
+    const userData = userState.questions[id];
+
+    if (userData) {
+      if (userData.solution !== undefined) {
+        parsedContent.solution = userData.solution;
+      }
+      if (userData.hints !== undefined && userData.hints.trim()) {
+        parsedContent.hints = userData.hints;
+      }
+    }
 
     return {
       id: data.id || id,
@@ -176,13 +198,13 @@ export async function getQuestionById(id: string, courseId?: string): Promise<Qu
       difficulty: data.difficulty || 2,
       isDifficult: Boolean(data.isDifficult),
       isNonExaminable: Boolean(data.isNonExaminable),
-      status: data.status || "Unattempted",
+      status: userData?.status || data.status || "Unattempted",
       concepts: Array.isArray(data.concepts) ? data.concepts : [],
       source: data.source || "",
-      snipUrl: data.snipUrl || "",
-      starred: Boolean(data.starred),
+      snipUrl: userData?.snipUrl || data.snipUrl || "",
+      starred: userData?.starred !== undefined ? Boolean(userData.starred) : Boolean(data.starred),
       createdAt: data.createdAt || new Date().toISOString(),
-      updatedAt: data.updatedAt || new Date().toISOString(),
+      updatedAt: userData?.updatedAt || data.updatedAt || new Date().toISOString(),
       content: parsedContent,
       rawBody: content
     };
@@ -193,6 +215,26 @@ export async function getQuestionById(id: string, courseId?: string): Promise<Qu
 }
 
 export async function saveQuestion(question: Question, courseId?: string): Promise<boolean> {
+  try {
+    const cleanCourseId = (courseId || "math2621").toLowerCase().replace(/[^a-z0-9]/g, "");
+
+    // Dedicate user modifications to userdata/
+    const success = await saveUserQuestionData(cleanCourseId, question.id, {
+      status: question.status,
+      starred: Boolean(question.starred),
+      solution: question.content.solution,
+      hints: question.content.hints,
+      snipUrl: question.snipUrl || ""
+    });
+
+    return success;
+  } catch (err) {
+    console.error(`Error saving user question ${question.id}:`, err);
+    return false;
+  }
+}
+
+export async function createOrUpdateMasterQuestion(question: Question, courseId?: string): Promise<boolean> {
   try {
     const dir = await resolveQuestionsDir(courseId);
     await fs.mkdir(dir, { recursive: true });
@@ -221,7 +263,7 @@ export async function saveQuestion(question: Question, courseId?: string): Promi
     await fs.writeFile(filePath, fileContent, "utf-8");
     return true;
   } catch (err) {
-    console.error(`Error saving question ${question.id}:`, err);
+    console.error(`Error creating master question ${question.id}:`, err);
     return false;
   }
 }

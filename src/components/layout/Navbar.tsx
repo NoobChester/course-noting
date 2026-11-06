@@ -14,9 +14,11 @@ import {
   Sparkles,
   ChevronDown,
   GraduationCap,
-  Plus
+  Plus,
+  Save
 } from "lucide-react";
 import { QuestionMeta, CourseMeta } from "@/lib/types";
+import { SaveLoadModal } from "./SaveLoadModal";
 
 export function Navbar() {
   const pathname = usePathname();
@@ -28,6 +30,7 @@ export function Navbar() {
     logoSymbol: "∫dz"
   });
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
 
   const [stats, setStats] = useState<{ total: number; mastered: number; review: number }>({
     total: 0,
@@ -184,6 +187,17 @@ export function Navbar() {
             </div>
           )}
 
+          {/* Save / Load Progress Button */}
+          <button
+            type="button"
+            onClick={() => setIsSaveModalOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 text-zinc-200 text-xs font-semibold transition cursor-pointer shadow-sm"
+            title="Save & Load User Progress (Copy-pasteable string or .json)"
+          >
+            <Save className="w-3.5 h-3.5 text-indigo-400" />
+            <span className="hidden sm:inline">Save / Load</span>
+          </button>
+
           <Link
             href="/questions"
             className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition shadow-sm flex items-center gap-1.5"
@@ -193,6 +207,12 @@ export function Navbar() {
           </Link>
         </div>
       </div>
+
+      {/* Save & Load Progress Modal */}
+      <SaveLoadModal
+        isOpen={isSaveModalOpen}
+        onClose={() => setIsSaveModalOpen(false)}
+      />
     </header>
   );
 }

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getAllQuestions, saveQuestion } from "@/lib/file-service";
+import { getAllQuestions, createOrUpdateMasterQuestion } from "@/lib/file-service";
 import { Question } from "@/lib/types";
 
 export async function GET(req: Request) {
@@ -22,7 +22,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
-    const success = await saveQuestion(body, courseId);
+    const success = await createOrUpdateMasterQuestion(body, courseId);
     if (!success) {
       return NextResponse.json({ error: "Failed to save question" }, { status: 500 });
     }

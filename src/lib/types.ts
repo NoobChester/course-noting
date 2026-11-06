@@ -67,3 +67,26 @@ export interface FilterOptions {
   onlyStarred: boolean;
   onlyDifficult: boolean;
 }
+
+export interface UserQuestionData {
+  status?: QuestionStatus;
+  starred?: boolean;
+  solution?: string;
+  hints?: string;
+  snipUrl?: string;
+  updatedAt?: string;
+}
+
+export interface CourseUserState {
+  courseId: string;
+  lastActive?: string;
+  questions: Record<string, UserQuestionData>;
+}
+
+export interface FullBackupPayload {
+  app: "course-noting";
+  version: number;
+  exportedAt: string;
+  courses: Record<string, CourseUserState>;
+}
+

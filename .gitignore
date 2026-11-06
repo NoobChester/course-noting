@@ -44,3 +44,13 @@ next-env.d.ts
 .venv/
 __pycache__/
 *.pyc
+
+# user progress and scratch data (keep repo clean for sharing)
+/userdata/*
+!/userdata/README.md
+!/userdata/.gitkeep
+!/userdata/uploads/
+/userdata/uploads/*
+!/userdata/uploads/.gitkeep
+/public/uploads/*
+!/public/uploads/.gitkeep
