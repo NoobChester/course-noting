@@ -4,8 +4,7 @@ import fs from "fs/promises";
 import path from "path";
 import { CourseMeta } from "@/lib/types";
 
-const COURSES_FILE = path.join(process.cwd(), "content", "courses.json");
-const CONTENT_DIR = path.join(process.cwd(), "content");
+const COURSES_BASE_DIR = path.join(process.cwd(), "courses");
 
 export async function GET() {
   try {
@@ -23,33 +22,24 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Code and name are required" }, { status: 400 });
     }
 
-    const courseId = body.id || body.code.toLowerCase().replace(/[^a-z0-9]/g, "");
-    const courses = await getAllRegisteredCourses();
+    const courseFolder = body.code.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const courseId = body.id || courseFolder.toLowerCase();
 
-    if (courses.some((c) => c.id === courseId)) {
-      return NextResponse.json({ error: "Course already exists" }, { status: 400 });
-    }
+    const targetDir = path.join(COURSES_BASE_DIR, courseFolder);
+    await fs.mkdir(path.join(targetDir, "questions"), { recursive: true });
+    await fs.mkdir(path.join(targetDir, "concepts"), { recursive: true });
 
     const newCourse: CourseMeta = {
       ...body,
       id: courseId,
+      code: courseFolder,
       logoSymbol: body.logoSymbol || "📚",
       term: body.term || "T1, 2027",
       institution: body.institution || "UNSW"
     };
 
-    courses.push(newCourse);
-    await fs.writeFile(COURSES_FILE, JSON.stringify(courses, null, 2), "utf-8");
-
-    // Create course folders
-    const courseDir = path.join(CONTENT_DIR, courseId);
-    await fs.mkdir(path.join(courseDir, "questions"), { recursive: true });
-    await fs.mkdir(path.join(courseDir, "concepts"), { recursive: true });
-    await fs.writeFile(
-      path.join(courseDir, "config.json"),
-      JSON.stringify(newCourse, null, 2),
-      "utf-8"
-    );
+    const configPath = path.join(targetDir, "course.json");
+    await fs.writeFile(configPath, JSON.stringify(newCourse, null, 2), "utf-8");
 
     return NextResponse.json({ success: true, course: newCourse });
   } catch (err) {

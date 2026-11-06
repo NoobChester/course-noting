@@ -1,3 +1,5 @@
+import { MathSnippet } from "./math-snippets";
+
 export type QuestionStatus = "Unattempted" | "In Progress" | "Needs Review" | "Mastered";
 
 export interface CourseMeta {
@@ -9,6 +11,7 @@ export interface CourseMeta {
   logoSymbol?: string;
   description?: string;
   preset?: string;
+  customSnippets?: MathSnippet[];
 }
 
 export interface QuestionMeta {

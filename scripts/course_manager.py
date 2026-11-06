@@ -5,8 +5,7 @@ import re
 import argparse
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CONTENT_DIR = os.path.join(BASE_DIR, "content")
-COURSES_FILE = os.path.join(CONTENT_DIR, "courses.json")
+COURSES_DIR = os.path.join(BASE_DIR, "courses")
 
 PRESETS = {
     "calculus": {
@@ -135,50 +134,48 @@ PRESETS = {
 }
 
 def load_courses():
-    if not os.path.exists(COURSES_FILE):
+    if not os.path.exists(COURSES_DIR):
         return []
-    with open(COURSES_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-def save_courses(courses):
-    os.makedirs(CONTENT_DIR, exist_ok=True)
-    with open(COURSES_FILE, "w", encoding="utf-8") as f:
-        json.dump(courses, f, indent=2)
+    courses = []
+    for folder in os.listdir(COURSES_DIR):
+        cfg_path = os.path.join(COURSES_DIR, folder, "course.json")
+        if os.path.exists(cfg_path):
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                try:
+                    courses.append(json.load(f))
+                except:
+                    pass
+    return sorted(courses, key=lambda c: c.get("code", ""))
 
 def create_course(code, name, term="T1, 2027", institution="University", preset="calculus"):
-    course_id = code.lower().replace(" ", "")
-    courses = load_courses()
+    course_folder = code.upper().replace(" ", "")
+    target_dir = os.path.join(COURSES_DIR, course_folder)
 
-    for c in courses:
-        if c["id"] == course_id:
-            print(f"Course {code} already exists!")
-            return course_id
+    if os.path.exists(target_dir):
+        print(f"Course folder {course_folder} already exists at {target_dir}!")
+        return course_folder
 
     preset_data = PRESETS.get(preset, PRESETS["general"])
 
     new_course = {
-        "id": course_id,
-        "code": code.upper(),
+        "id": course_folder.lower(),
+        "code": course_folder,
         "name": name,
         "institution": institution,
         "term": term,
         "logoSymbol": preset_data["logoSymbol"],
         "description": f"Study workspace, question bank, and concept guides for {code} ({name}).",
-        "preset": preset
+        "preset": preset,
+        "customSnippets": preset_data["snippets"]
     }
 
-    courses.append(new_course)
-    save_courses(courses)
-
-    # Create directories
-    course_dir = os.path.join(CONTENT_DIR, course_id)
-    questions_dir = os.path.join(course_dir, "questions")
-    concepts_dir = os.path.join(course_dir, "concepts")
+    questions_dir = os.path.join(target_dir, "questions")
+    concepts_dir = os.path.join(target_dir, "concepts")
     os.makedirs(questions_dir, exist_ok=True)
     os.makedirs(concepts_dir, exist_ok=True)
 
     # Save course config
-    with open(os.path.join(course_dir, "config.json"), "w", encoding="utf-8") as f:
+    with open(os.path.join(target_dir, "course.json"), "w", encoding="utf-8") as f:
         json.dump(new_course, f, indent=2)
 
     # Seed default concepts for preset
@@ -198,11 +195,12 @@ prerequisites: {json.dumps(concept['prerequisites'])}
         with open(c_path, "w", encoding="utf-8") as f:
             f.write(content)
 
-    print(f"Successfully created course {code} ({name}) at content/{course_id}/")
-    return course_id
+    print(f"Successfully created self-contained course {code} ({name}) at courses/{course_folder}/")
+    return course_folder
 
-def parse_text_or_pdf(text, course_id, default_topic="General"):
-    questions_dir = os.path.join(CONTENT_DIR, course_id, "questions")
+def parse_text_or_pdf(text, course_code, default_topic="General"):
+    course_folder = course_code.upper().replace(" ", "")
+    questions_dir = os.path.join(COURSES_DIR, course_folder, "questions")
     os.makedirs(questions_dir, exist_ok=True)
 
     # Regex to identify question boundaries
@@ -308,8 +306,9 @@ def main():
         courses = load_courses()
         print(f"\nRegistered Courses ({len(courses)}):")
         for c in courses:
-            q_dir = os.path.join(CONTENT_DIR, c["id"], "questions")
-            c_dir = os.path.join(CONTENT_DIR, c["id"], "concepts")
+            c_code = c.get("code", c.get("id", ""))
+            q_dir = os.path.join(COURSES_DIR, c_code, "questions")
+            c_dir = os.path.join(COURSES_DIR, c_code, "concepts")
             q_count = len([f for f in os.listdir(q_dir) if f.endswith(".md")]) if os.path.exists(q_dir) else 0
             c_count = len([f for f in os.listdir(c_dir) if f.endswith(".md")]) if os.path.exists(c_dir) else 0
             print(f"  • {c['code']} - {c['name']} (Preset: {c.get('preset', 'N/A')}) -> {q_count} questions, {c_count} concepts")
