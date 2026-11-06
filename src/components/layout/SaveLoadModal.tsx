@@ -49,7 +49,8 @@ export function SaveLoadModal({ isOpen, onClose }: SaveLoadModalProps) {
   useEffect(() => {
     if (isOpen) {
       setStatusMessage(null);
-      fetch("/api/userdata")
+      const activeCourse = localStorage.getItem("math_active_course") || "math2621";
+      fetch(`/api/userdata?activeCourse=${activeCourse}`)
         .then((res) => res.json())
         .then((data) => {
           if (data.success) {
@@ -138,6 +139,10 @@ export function SaveLoadModal({ isOpen, onClose }: SaveLoadModalProps) {
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to load backup");
+
+      if (data.activeCourse) {
+        localStorage.setItem("math_active_course", data.activeCourse);
+      }
 
       setStatusMessage({
         type: "success",

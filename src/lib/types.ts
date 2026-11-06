@@ -87,6 +87,7 @@ export interface FullBackupPayload {
   app: "course-noting";
   version: number;
   exportedAt: string;
+  activeCourse?: string;
   courses: Record<string, CourseUserState>;
 }
 

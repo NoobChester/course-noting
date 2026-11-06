@@ -12,14 +12,15 @@ export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const courseId = searchParams.get("course");
+    const activeCourse = searchParams.get("activeCourse") || undefined;
 
     if (courseId) {
       const state = await getUserCourseState(courseId);
       return NextResponse.json({ success: true, courseId, state });
     }
 
-    const payload = await exportBackupData();
-    const saveString = await exportBackupString();
+    const payload = await exportBackupData(activeCourse);
+    const saveString = await exportBackupString(activeCourse);
 
     // Calculate aggregated stats
     let totalQuestionsWithData = 0;

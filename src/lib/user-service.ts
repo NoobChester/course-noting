@@ -110,18 +110,19 @@ export async function getAllUserStates(): Promise<Record<string, CourseUserState
   return result;
 }
 
-export async function exportBackupData(): Promise<FullBackupPayload> {
+export async function exportBackupData(activeCourse?: string): Promise<FullBackupPayload> {
   const courses = await getAllUserStates();
   return {
     app: "course-noting",
     version: 1,
     exportedAt: new Date().toISOString(),
+    activeCourse: activeCourse || undefined,
     courses
   };
 }
 
-export async function exportBackupString(): Promise<string> {
-  const payload = await exportBackupData();
+export async function exportBackupString(activeCourse?: string): Promise<string> {
+  const payload = await exportBackupData(activeCourse);
   const jsonStr = JSON.stringify(payload);
   const base64Str = Buffer.from(jsonStr, "utf-8").toString("base64");
   return `CNBACKUP:v1:${base64Str}`;
@@ -156,7 +157,7 @@ export function parseBackupString(raw: string): FullBackupPayload {
 export async function importBackupPayload(
   payload: FullBackupPayload,
   mode: "merge" | "replace" = "merge"
-): Promise<{ restoredCourses: number; restoredQuestions: number }> {
+): Promise<{ restoredCourses: number; restoredQuestions: number; activeCourse?: string }> {
   if (!payload || !payload.courses || typeof payload.courses !== "object") {
     throw new Error("Invalid backup payload structure.");
   }
@@ -194,7 +195,7 @@ export async function importBackupPayload(
     restoredQuestions += qCount;
   }
 
-  return { restoredCourses, restoredQuestions };
+  return { restoredCourses, restoredQuestions, activeCourse: payload.activeCourse };
 }
 
 export async function resetAllUserData(): Promise<boolean> {
