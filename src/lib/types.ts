@@ -28,6 +28,7 @@ export interface QuestionMeta {
   source?: string;
   snipUrl?: string;
   starred?: boolean;
+  sm2?: SM2Data;
   createdAt: string;
   updatedAt: string;
 }
@@ -42,6 +43,8 @@ export interface QuestionContent {
 export interface Question extends QuestionMeta {
   content: QuestionContent;
   rawBody: string;
+  canvasData?: string;
+  lastProofReview?: ProofReviewResult;
 }
 
 export interface ConceptMeta {
@@ -68,12 +71,25 @@ export interface FilterOptions {
   onlyDifficult: boolean;
 }
 
+export interface SM2Data {
+  repetition: number;
+  interval: number;
+  easeFactor: number;
+  dueDate: string;
+  lastReviewedAt: string;
+}
+
+export type SM2Rating = "again" | "hard" | "good" | "easy";
+
 export interface UserQuestionData {
   status?: QuestionStatus;
   starred?: boolean;
   solution?: string;
   hints?: string;
   snipUrl?: string;
+  canvasData?: string; // Serialized vector strokes for re-editing
+  sm2?: SM2Data;
+  lastProofReview?: ProofReviewResult;
   updatedAt?: string;
 }
 
@@ -90,4 +106,27 @@ export interface FullBackupPayload {
   activeCourse?: string;
   courses: Record<string, CourseUserState>;
 }
+
+export type AIProvider = "gemini" | "openai" | "anthropic" | "ollama";
+
+export interface AISettings {
+  provider: AIProvider;
+  geminiKey?: string;
+  openaiKey?: string;
+  anthropicKey?: string;
+  ollamaUrl?: string;
+  ollamaModel?: string;
+}
+
+export interface ProofReviewResult {
+  verdict: "Rigorous Proof" | "Correct with Minor Gaps" | "Missing Hypotheses" | "Flawed Logic";
+  score: number; // 0 to 10
+  summary: string;
+  missingHypotheses: string[];
+  logicalGaps: string[];
+  strengths: string[];
+  suggestedPatch: string;
+  alternativeMethodNotes?: string;
+}
+
 

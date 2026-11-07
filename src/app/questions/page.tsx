@@ -15,8 +15,10 @@ import {
   BookOpen,
   HelpCircle,
   Flame,
-  FileText
+  FileText,
+  Calendar
 } from "lucide-react";
+import { isDueToday } from "@/lib/sm2-service";
 
 function QuestionBankContent() {
   const searchParams = useSearchParams();
@@ -34,6 +36,7 @@ function QuestionBankContent() {
   const [selectedWeek, setSelectedWeek] = useState("");
   const [onlyDifficult, setOnlyDifficult] = useState(false);
   const [onlyStarred, setOnlyStarred] = useState(false);
+  const [onlyDue, setOnlyDue] = useState(false);
 
   useEffect(() => {
     const courseId = localStorage.getItem("math_active_course") || "math2621";
@@ -87,10 +90,11 @@ function QuestionBankContent() {
       if (selectedWeek && q.week.toString() !== selectedWeek) return false;
       if (onlyDifficult && !q.isDifficult) return false;
       if (onlyStarred && !q.starred) return false;
+      if (onlyDue && !isDueToday(q.sm2?.dueDate)) return false;
 
       return true;
     });
-  }, [questions, search, selectedTopic, selectedSource, selectedStatus, selectedWeek, onlyDifficult, onlyStarred]);
+  }, [questions, search, selectedTopic, selectedSource, selectedStatus, selectedWeek, onlyDifficult, onlyStarred, onlyDue]);
 
   const toggleStar = async (e: React.MouseEvent, q: QuestionMeta) => {
     e.preventDefault();
@@ -262,7 +266,7 @@ function QuestionBankContent() {
             </select>
           </div>
 
-          {/* Checkboxes: Difficult & Starred */}
+          {/* Checkboxes: Difficult, Starred, Due Today */}
           <div className="flex items-center gap-1.5 col-span-2 sm:col-span-1">
             <label className="flex-1 flex items-center gap-1 px-2.5 py-1.5 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-300 cursor-pointer hover:bg-zinc-900 transition">
               <input
@@ -287,6 +291,19 @@ function QuestionBankContent() {
               <span className="flex items-center gap-0.5">
                 <Star className="w-3.5 h-3.5 text-yellow-400 fill-yellow-400" />
                 <span>Star</span>
+              </span>
+            </label>
+
+            <label className="flex-1 flex items-center gap-1 px-2.5 py-1.5 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-300 cursor-pointer hover:bg-zinc-900 transition">
+              <input
+                type="checkbox"
+                checked={onlyDue}
+                onChange={(e) => setOnlyDue(e.target.checked)}
+                className="rounded bg-zinc-800 text-indigo-600 border-zinc-700"
+              />
+              <span className="flex items-center gap-0.5">
+                <Calendar className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Due</span>
               </span>
             </label>
           </div>
@@ -350,6 +367,11 @@ function QuestionBankContent() {
                     {q.isNonExaminable && (
                       <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-purple-950 text-purple-400 border border-purple-800" title="Non-examinable extension topic">
                         † Extension
+                      </span>
+                    )}
+                    {q.sm2 && isDueToday(q.sm2.dueDate) && (
+                      <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse">
+                        Due Today
                       </span>
                     )}
                   </div>

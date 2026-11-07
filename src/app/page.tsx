@@ -17,6 +17,7 @@ import {
   Scissors
 } from "lucide-react";
 import { COURSE_CONFIG } from "@/course.config";
+import { isDueToday } from "@/lib/sm2-service";
 
 export default function DashboardPage() {
   const [questions, setQuestions] = useState<QuestionMeta[]>([]);
@@ -42,6 +43,7 @@ export default function DashboardPage() {
   const needsReview = questions.filter((q) => q.status === "Needs Review").length;
   const inProgress = questions.filter((q) => q.status === "In Progress").length;
   const unattempted = questions.filter((q) => q.status === "Unattempted").length;
+  const dueTodayCount = questions.filter((q) => isDueToday(q.sm2?.dueDate)).length;
   const masteredPercent = total > 0 ? Math.round((mastered / total) * 100) : 0;
 
   // Group by topic
@@ -81,12 +83,20 @@ export default function DashboardPage() {
           </p>
 
           <div className="pt-2 flex flex-wrap items-center gap-3">
+            <Link
+              href="/daily-review"
+              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-zinc-950 font-black text-sm shadow-lg shadow-orange-500/20 flex items-center gap-2 transition"
+            >
+              <Flame className="w-4 h-4 text-zinc-950 fill-zinc-950" />
+              <span>Daily Review {dueTodayCount > 0 ? `(${dueTodayCount} Due)` : "Queue"}</span>
+            </Link>
+
             {nextQuestionToSolve && (
               <Link
                 href={`/questions/${nextQuestionToSolve.id}`}
-                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm shadow-lg shadow-indigo-600/30 flex items-center gap-2 transition"
+                className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm shadow-lg shadow-indigo-600/30 flex items-center gap-2 transition"
               >
-                <span>Continue Solving: Q{nextQuestionToSolve.number}</span>
+                <span>Continue: Q{nextQuestionToSolve.number}</span>
                 <ArrowRight className="w-4 h-4" />
               </Link>
             )}

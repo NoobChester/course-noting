@@ -3,10 +3,12 @@
 import React, { useEffect, useState, use, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Question, QuestionStatus } from "@/lib/types";
+import { Question, QuestionStatus, ProofReviewResult, AISettings } from "@/lib/types";
 import { MathRenderer } from "@/components/math/MathRenderer";
 import { SplitEditor } from "@/components/math/SplitEditor";
 import { ConceptDrawer } from "@/components/concepts/ConceptDrawer";
+import { ScratchpadCanvas } from "@/components/canvas/ScratchpadCanvas";
+import { calculateNextSM2, getIntervalPreview, isDueToday } from "@/lib/sm2-service";
 import confetti from "canvas-confetti";
 import {
   ArrowLeft,
@@ -21,7 +23,17 @@ import {
   Eye,
   EyeOff,
   Flame,
-  Sparkles
+  Sparkles,
+  PenTool,
+  Cpu,
+  AlertTriangle,
+  Check,
+  Copy,
+  ChevronDown,
+  ChevronUp,
+  Loader2,
+  Calendar,
+  Layers
 } from "lucide-react";
 
 export default function QuestionWorkspacePage({
@@ -42,9 +54,21 @@ export default function QuestionWorkspacePage({
   const [activeTab, setActiveTab] = useState<"solution" | "hints" | "official">("solution");
   const [showOfficialAnswer, setShowOfficialAnswer] = useState(false);
 
-  // Editable solution content
+  // Editable solution content & scratchpad state
   const [solutionText, setSolutionText] = useState("");
   const [hintsText, setHintsText] = useState("");
+  const [canvasData, setCanvasData] = useState<string | undefined>(undefined);
+  const [isScratchpadOpen, setIsScratchpadOpen] = useState(false);
+
+  // AI Proof Review State
+  const [isReviewing, setIsReviewing] = useState(false);
+  const [reviewResult, setReviewResult] = useState<ProofReviewResult | null>(null);
+  const [isReviewOpen, setIsReviewOpen] = useState(true);
+  const [copiedPatch, setCopiedPatch] = useState(false);
+
+  // SM-2 Flashcard notification
+  const [sm2Notice, setSm2Notice] = useState("");
+
   const [allQuestionIds, setAllQuestionIds] = useState<string[]>([]);
   const isInitialLoad = useRef(true);
 
@@ -71,12 +95,16 @@ export default function QuestionWorkspacePage({
         setQuestion(data);
         setSolutionText(data.content.solution || "");
         setHintsText(data.content.hints || "");
+        setCanvasData(data.canvasData);
+        if (data.lastProofReview) {
+          setReviewResult(data.lastProofReview);
+        }
       })
       .catch((err) => console.error(err))
       .finally(() => setLoading(false));
   }, [id]);
 
-  // Debounced Autosave (1.2 seconds after you pause typing)
+  // Debounced Autosave (1.5 seconds after you pause typing)
   useEffect(() => {
     if (isInitialLoad.current) {
       if (question) isInitialLoad.current = false;
@@ -85,10 +113,10 @@ export default function QuestionWorkspacePage({
 
     const timer = setTimeout(() => {
       handleSave();
-    }, 1200);
+    }, 1500);
 
     return () => clearTimeout(timer);
-  }, [solutionText, hintsText]);
+  }, [solutionText, hintsText, canvasData]);
 
   // Ctrl + S Keyboard Shortcut
   useEffect(() => {
@@ -100,19 +128,19 @@ export default function QuestionWorkspacePage({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [solutionText, hintsText, question]);
+  }, [solutionText, hintsText, canvasData, question]);
 
-  const handleSave = async (updatedStatus?: QuestionStatus) => {
+  const handleSave = async (updatedFields?: Partial<Question>) => {
     if (!question) return;
 
     setSaving(true);
     setSaveMessage("Saving...");
 
     const courseId = localStorage.getItem("math_active_course") || "math2621";
-    const newStatus = updatedStatus || question.status;
     const updatedPayload: Question = {
       ...question,
-      status: newStatus,
+      ...updatedFields,
+      canvasData: updatedFields?.canvasData !== undefined ? updatedFields.canvasData : canvasData,
       content: {
         ...question.content,
         solution: solutionText,
@@ -130,9 +158,9 @@ export default function QuestionWorkspacePage({
       if (!res.ok) throw new Error("Failed to save");
 
       setQuestion(updatedPayload);
-      setSaveMessage("Saved to disk ✓");
+      setSaveMessage("Saved ✓");
 
-      if (newStatus === "Mastered" && question.status !== "Mastered") {
+      if (updatedFields?.status === "Mastered" && question.status !== "Mastered") {
         confetti({
           particleCount: 80,
           spread: 60,
@@ -166,6 +194,102 @@ export default function QuestionWorkspacePage({
     }
   };
 
+  // SM-2 Review Rating Handler
+  const handleSM2Rating = async (rating: "again" | "hard" | "good" | "easy") => {
+    if (!question) return;
+    const nextSM2 = calculateNextSM2(question.sm2, rating);
+
+    // Map rating to recommended question status
+    let newStatus = question.status;
+    if (rating === "again") newStatus = "Needs Review";
+    else if (rating === "hard") newStatus = "In Progress";
+    else if (rating === "good" || rating === "easy") newStatus = "Mastered";
+
+    const updated = {
+      ...question,
+      status: newStatus,
+      sm2: nextSM2
+    };
+
+    setQuestion(updated);
+    setSm2Notice(`Next review: ${nextSM2.dueDate} (in ${nextSM2.interval}d)`);
+    setTimeout(() => setSm2Notice(""), 4000);
+
+    await handleSave({ status: newStatus, sm2: nextSM2 });
+
+    if (rating === "easy" || rating === "good") {
+      confetti({ particleCount: 50, spread: 45, origin: { y: 0.7 } });
+    }
+  };
+
+  // Run AI Proof Review
+  const handleAIProofReview = async () => {
+    if (!solutionText.trim()) {
+      alert("Please write or type your proof first before requesting an AI audit!");
+      return;
+    }
+
+    setIsReviewing(true);
+    setReviewResult(null);
+
+    try {
+      const courseId = localStorage.getItem("math_active_course") || "math2621";
+
+      // Load AI settings from localStorage
+      let aiSettings: AISettings = { provider: "gemini" };
+      try {
+        const stored = localStorage.getItem("cn_ai_settings");
+        if (stored) aiSettings = JSON.parse(stored);
+      } catch {}
+
+      const apiKey =
+        aiSettings.provider === "gemini"
+          ? aiSettings.geminiKey
+          : aiSettings.provider === "openai"
+          ? aiSettings.openaiKey
+          : aiSettings.provider === "anthropic"
+          ? aiSettings.anthropicKey
+          : undefined;
+
+      const res = await fetch("/api/ai/review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          questionId: id,
+          courseId,
+          studentSolution: solutionText,
+          apiKey,
+          provider: aiSettings.provider,
+          ollamaUrl: aiSettings.ollamaUrl,
+          ollamaModel: aiSettings.ollamaModel
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Proof review request failed");
+      }
+
+      setReviewResult(data.result);
+      setIsReviewOpen(true);
+
+      if (question) {
+        setQuestion({ ...question, lastProofReview: data.result });
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || "Failed to audit proof. Please check your API key in Settings (Gear icon in top navigation).");
+    } finally {
+      setIsReviewing(false);
+    }
+  };
+
+  const copySuggestedPatch = (patchText: string) => {
+    navigator.clipboard.writeText(patchText);
+    setCopiedPatch(true);
+    setTimeout(() => setCopiedPatch(false), 2000);
+  };
+
   if (loading) {
     return (
       <div className="max-w-7xl mx-auto px-4 py-20 text-center text-zinc-500 animate-pulse text-sm">
@@ -185,7 +309,6 @@ export default function QuestionWorkspacePage({
     );
   }
 
-  // Dynamic Next / Prev navigation based on full question sequence
   const currentIndex = allQuestionIds.indexOf(id);
   const prevId = currentIndex > 0 ? allQuestionIds[currentIndex - 1] : null;
   const nextId = currentIndex >= 0 && currentIndex < allQuestionIds.length - 1 ? allQuestionIds[currentIndex + 1] : null;
@@ -238,20 +361,20 @@ export default function QuestionWorkspacePage({
             <Star className={`w-4 h-4 ${question.starred ? "fill-yellow-400" : ""}`} />
           </button>
 
-          {/* Needed Concepts Cheat Sheet Trigger */}
+          {/* Concepts Cheat Sheet Trigger */}
           <button
             type="button"
             onClick={() => setIsConceptDrawerOpen(true)}
             className="px-3 py-2 rounded-lg bg-indigo-950/70 border border-indigo-800/80 text-indigo-300 hover:bg-indigo-600 hover:text-white transition text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-sm"
           >
             <BookOpen className="w-4 h-4" />
-            <span>Concept Cheat Sheet ({question.concepts.length})</span>
+            <span>Concepts ({question.concepts.length})</span>
           </button>
 
           {/* Status Dropdown */}
           <select
             value={question.status}
-            onChange={(e) => handleSave(e.target.value as QuestionStatus)}
+            onChange={(e) => handleSave({ status: e.target.value as QuestionStatus })}
             className="px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-xs font-semibold text-zinc-200 focus:outline-none focus:border-indigo-500 cursor-pointer"
           >
             <option value="Unattempted">Status: Unattempted</option>
@@ -308,6 +431,65 @@ export default function QuestionWorkspacePage({
         </div>
       </div>
 
+      {/* SM-2 Spaced Repetition Bar (Anki Style) */}
+      <div className="p-3 sm:px-4 sm:py-2.5 rounded-2xl bg-zinc-900/80 border border-zinc-800 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Calendar className="w-4 h-4 text-indigo-400" />
+          <span className="text-xs font-bold text-zinc-300">Spaced Review:</span>
+          {question.sm2 ? (
+            <span className="text-xs text-zinc-400">
+              Rep #{question.sm2.repetition} • Due:{" "}
+              <span className={isDueToday(question.sm2.dueDate) ? "text-amber-400 font-bold" : "text-zinc-300"}>
+                {question.sm2.dueDate} {isDueToday(question.sm2.dueDate) ? "(Due Today!)" : ""}
+              </span>
+            </span>
+          ) : (
+            <span className="text-xs text-zinc-500">Not yet scheduled</span>
+          )}
+          {sm2Notice && (
+            <span className="text-xs text-emerald-400 font-semibold animate-pulse ml-2">
+              {sm2Notice}
+            </span>
+          )}
+        </div>
+
+        {/* 4 Anki Buttons */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <button
+            type="button"
+            onClick={() => handleSM2Rating("again")}
+            className="px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/20 text-xs font-bold transition cursor-pointer"
+            title="Needed solution / failed completely"
+          >
+            Again ({getIntervalPreview(question.sm2, "again")})
+          </button>
+          <button
+            type="button"
+            onClick={() => handleSM2Rating("hard")}
+            className="px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/20 text-xs font-bold transition cursor-pointer"
+            title="Struggled or had major gaps"
+          >
+            Hard ({getIntervalPreview(question.sm2, "hard")})
+          </button>
+          <button
+            type="button"
+            onClick={() => handleSM2Rating("good")}
+            className="px-2.5 py-1 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/20 text-xs font-bold transition cursor-pointer"
+            title="Correct proof with reasonable effort"
+          >
+            Good ({getIntervalPreview(question.sm2, "good")})
+          </button>
+          <button
+            type="button"
+            onClick={() => handleSM2Rating("easy")}
+            className="px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/20 text-xs font-bold transition cursor-pointer"
+            title="Instant recall / flawless proof"
+          >
+            Easy ({getIntervalPreview(question.sm2, "easy")})
+          </button>
+        </div>
+      </div>
+
       {/* Question Prompt Display Box */}
       <div className="p-5 sm:p-6 rounded-2xl bg-zinc-900/80 border border-zinc-800/80 shadow-md space-y-4">
         <div className="flex items-center justify-between text-xs text-zinc-400 font-semibold uppercase tracking-wider border-b border-zinc-800/60 pb-2">
@@ -317,7 +499,6 @@ export default function QuestionWorkspacePage({
           )}
         </div>
 
-        {/* If question has a cropped screenshot from the problem sheet */}
         {question.snipUrl && (
           <div className="p-2 rounded-xl bg-zinc-950 border border-zinc-800 max-w-xl mx-auto overflow-hidden">
             <img src={question.snipUrl} alt="Question snip" className="max-h-72 mx-auto rounded object-contain" />
@@ -331,8 +512,8 @@ export default function QuestionWorkspacePage({
 
       {/* Solution & Hints Workspace Area */}
       <div className="space-y-3">
-        {/* Workspace Tab Switcher */}
-        <div className="flex items-center justify-between border-b border-zinc-800">
+        {/* Workspace Tab Switcher & Quick Actions */}
+        <div className="flex flex-wrap items-center justify-between border-b border-zinc-800 pb-1 gap-2">
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -369,10 +550,192 @@ export default function QuestionWorkspacePage({
             </button>
           </div>
 
-          <div className="text-xs text-zinc-500">
-            {saveMessage && <span className="text-emerald-400 font-semibold">{saveMessage}</span>}
+          <div className="flex items-center gap-2">
+            {/* Toggle Scratchpad Button */}
+            <button
+              type="button"
+              onClick={() => setIsScratchpadOpen(!isScratchpadOpen)}
+              className={`px-3 py-1.5 rounded-lg border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer ${
+                isScratchpadOpen
+                  ? "bg-violet-600 text-white border-violet-500 shadow-sm"
+                  : "bg-zinc-900 border-zinc-800 text-zinc-300 hover:bg-zinc-800"
+              }`}
+              title="Toggle handwriting & chalkboard scratchpad"
+            >
+              <PenTool className="w-3.5 h-3.5 text-violet-400" />
+              <span>{isScratchpadOpen ? "Hide Scratchpad" : "✍️ Scratchpad Canvas"}</span>
+            </button>
+
+            {/* AI Proof Reviewer Trigger */}
+            <button
+              type="button"
+              onClick={handleAIProofReview}
+              disabled={isReviewing || !solutionText.trim()}
+              className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 transition shadow-sm disabled:opacity-40 cursor-pointer"
+              title="Audit typed proof against lecturer benchmark and flag missing hypotheses"
+            >
+              {isReviewing ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="w-3.5 h-3.5" />
+              )}
+              <span>{isReviewing ? "Auditing Proof..." : "🤖 Audit Proof with AI"}</span>
+            </button>
           </div>
         </div>
+
+        {/* Scratchpad Canvas Drawer */}
+        {isScratchpadOpen && (
+          <ScratchpadCanvas
+            initialData={canvasData}
+            onChange={(newCanvasData) => {
+              setCanvasData(newCanvasData);
+            }}
+            onInsertImage={(imgMd) => {
+              setSolutionText((prev) => prev + imgMd);
+            }}
+            onClose={() => setIsScratchpadOpen(false)}
+          />
+        )}
+
+        {/* AI Proof Review Audit Card */}
+        {reviewResult && (
+          <div className="rounded-2xl bg-zinc-950 border border-violet-500/40 shadow-2xl overflow-hidden animate-in fade-in duration-200">
+            {/* Card Header */}
+            <div className="px-5 py-3.5 bg-violet-950/30 border-b border-violet-500/30 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-violet-600/30 border border-violet-500/40 flex items-center justify-center text-violet-300">
+                  <Cpu className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-bold text-zinc-100">AI Proof Auditor Report</h3>
+                    <span
+                      className={`px-2.5 py-0.5 rounded-full text-xs font-extrabold border ${
+                        reviewResult.verdict === "Rigorous Proof"
+                          ? "bg-emerald-950 text-emerald-300 border-emerald-800"
+                          : reviewResult.verdict === "Correct with Minor Gaps"
+                          ? "bg-blue-950 text-blue-300 border-blue-800"
+                          : reviewResult.verdict === "Missing Hypotheses"
+                          ? "bg-amber-950 text-amber-300 border-amber-800"
+                          : "bg-rose-950 text-rose-300 border-rose-800"
+                      }`}
+                    >
+                      {reviewResult.verdict}
+                    </span>
+                    <span className="text-xs font-mono font-bold text-violet-300 bg-violet-950/80 px-2 py-0.5 rounded border border-violet-800">
+                      Score: {reviewResult.score}/10
+                    </span>
+                  </div>
+                  <p className="text-xs text-zinc-400 mt-0.5">{reviewResult.summary}</p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsReviewOpen(!isReviewOpen)}
+                className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900 transition"
+              >
+                {isReviewOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              </button>
+            </div>
+
+            {/* Card Body */}
+            {isReviewOpen && (
+              <div className="p-5 space-y-4 text-xs">
+                {/* Missing Hypotheses Callout */}
+                {reviewResult.missingHypotheses && reviewResult.missingHypotheses.length > 0 && (
+                  <div className="p-3.5 rounded-xl bg-amber-950/20 border border-amber-500/30 space-y-1.5">
+                    <div className="flex items-center gap-1.5 font-bold text-amber-400">
+                      <AlertTriangle className="w-4 h-4" />
+                      <span>Missing Hypotheses & Unchecked Conditions</span>
+                    </div>
+                    <ul className="list-disc pl-5 space-y-1 text-zinc-300">
+                      {reviewResult.missingHypotheses.map((item, idx) => (
+                        <li key={idx}>
+                          <MathRenderer content={item} />
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Logical Gaps */}
+                {reviewResult.logicalGaps && reviewResult.logicalGaps.length > 0 && (
+                  <div className="p-3.5 rounded-xl bg-rose-950/20 border border-rose-500/30 space-y-1.5">
+                    <div className="flex items-center gap-1.5 font-bold text-rose-400">
+                      <AlertCircle className="w-4 h-4" />
+                      <span>Logical Leaps & Unjustified Assertions</span>
+                    </div>
+                    <ul className="list-disc pl-5 space-y-1 text-zinc-300">
+                      {reviewResult.logicalGaps.map((item, idx) => (
+                        <li key={idx}>
+                          <MathRenderer content={item} />
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Strengths */}
+                {reviewResult.strengths && reviewResult.strengths.length > 0 && (
+                  <div className="p-3.5 rounded-xl bg-emerald-950/20 border border-emerald-500/30 space-y-1.5">
+                    <div className="flex items-center gap-1.5 font-bold text-emerald-400">
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Sound Deductions & Valid Reasoning</span>
+                    </div>
+                    <ul className="list-disc pl-5 space-y-1 text-zinc-300">
+                      {reviewResult.strengths.map((item, idx) => (
+                        <li key={idx}>
+                          <MathRenderer content={item} />
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Alternative Method Notes */}
+                {reviewResult.alternativeMethodNotes && (
+                  <div className="p-3 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-300">
+                    <span className="font-bold text-indigo-400">Alternative Approach Note: </span>
+                    {reviewResult.alternativeMethodNotes}
+                  </div>
+                )}
+
+                {/* Suggested LaTeX Patch */}
+                {reviewResult.suggestedPatch && (
+                  <div className="space-y-1.5 pt-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-zinc-300">Suggested Proof Patch & Rigorous Steps:</span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => copySuggestedPatch(reviewResult.suggestedPatch)}
+                          className="flex items-center gap-1 px-2.5 py-1 rounded bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 text-[11px] font-semibold cursor-pointer"
+                        >
+                          {copiedPatch ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                          <span>{copiedPatch ? "Copied!" : "Copy Patch"}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSolutionText((prev) => `${prev}\n\n### Suggested Rigorous Patch\n${reviewResult.suggestedPatch}\n`);
+                          }}
+                          className="flex items-center gap-1 px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold cursor-pointer"
+                        >
+                          <span>Append to Working</span>
+                        </button>
+                      </div>
+                    </div>
+                    <div className="p-3.5 rounded-xl bg-zinc-900/90 border border-zinc-800 text-zinc-200">
+                      <MathRenderer content={reviewResult.suggestedPatch} />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Tab 1: Solution Split Editor */}
         {activeTab === "solution" && (
@@ -380,11 +743,11 @@ export default function QuestionWorkspacePage({
             <SplitEditor
               value={solutionText}
               onChange={setSolutionText}
-              placeholder="Insert your mathematical proof or solution here using LaTeX ($...$ for inline, $$...$$ for display blocks). Click 'Attach Handwritten Work' or paste clipboard images if you worked on pen and paper!"
+              placeholder="Insert your mathematical proof or solution here using LaTeX ($...$ for inline, $$...$$ for display blocks). Click '✍️ Scratchpad Canvas' above to draw or write notes!"
               minHeight="480px"
             />
             <div className="flex items-center justify-between text-xs text-zinc-400 px-1">
-              <span>Supports both typed LaTeX and direct handwritten photo uploads</span>
+              <span>Supports typed LaTeX, scratchpad chalkboard vectors, and image attachments</span>
               <button
                 type="button"
                 onClick={() => handleSave()}
@@ -425,7 +788,7 @@ export default function QuestionWorkspacePage({
             <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
               <div>
                 <h3 className="text-sm font-bold text-zinc-100">Official Solution Notes & Answers</h3>
-                <p className="text-xs text-zinc-400">Directly from the UNSW MATH2621 problem sheet</p>
+                <p className="text-xs text-zinc-400">Directly from the problem sheet</p>
               </div>
 
               <button

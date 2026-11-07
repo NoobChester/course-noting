@@ -155,6 +155,7 @@ export async function getAllQuestions(courseId?: string): Promise<QuestionMeta[]
         source: data.source || "",
         snipUrl: userData?.snipUrl || data.snipUrl || "",
         starred: userData?.starred !== undefined ? Boolean(userData.starred) : Boolean(data.starred),
+        sm2: userData?.sm2,
         createdAt: data.createdAt || new Date().toISOString(),
         updatedAt: userData?.updatedAt || data.updatedAt || new Date().toISOString()
       });
@@ -203,6 +204,9 @@ export async function getQuestionById(id: string, courseId?: string): Promise<Qu
       source: data.source || "",
       snipUrl: userData?.snipUrl || data.snipUrl || "",
       starred: userData?.starred !== undefined ? Boolean(userData.starred) : Boolean(data.starred),
+      sm2: userData?.sm2,
+      canvasData: userData?.canvasData,
+      lastProofReview: userData?.lastProofReview,
       createdAt: data.createdAt || new Date().toISOString(),
       updatedAt: userData?.updatedAt || data.updatedAt || new Date().toISOString(),
       content: parsedContent,
@@ -224,7 +228,10 @@ export async function saveQuestion(question: Question, courseId?: string): Promi
       starred: Boolean(question.starred),
       solution: question.content.solution,
       hints: question.content.hints,
-      snipUrl: question.snipUrl || ""
+      snipUrl: question.snipUrl || "",
+      canvasData: question.canvasData,
+      sm2: question.sm2,
+      lastProofReview: question.lastProofReview
     });
 
     return success;

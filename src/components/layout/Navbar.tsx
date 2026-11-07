@@ -15,10 +15,14 @@ import {
   ChevronDown,
   GraduationCap,
   Plus,
-  Save
+  Save,
+  Settings,
+  Flame
 } from "lucide-react";
 import { QuestionMeta, CourseMeta } from "@/lib/types";
+import { isDueToday } from "@/lib/sm2-service";
 import { SaveLoadModal } from "./SaveLoadModal";
+import { SettingsModal } from "./SettingsModal";
 
 export function Navbar() {
   const pathname = usePathname();
@@ -31,11 +35,13 @@ export function Navbar() {
   });
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
-  const [stats, setStats] = useState<{ total: number; mastered: number; review: number }>({
+  const [stats, setStats] = useState<{ total: number; mastered: number; review: number; dueToday: number }>({
     total: 0,
     mastered: 0,
-    review: 0
+    review: 0,
+    dueToday: 0
   });
 
   useEffect(() => {
@@ -60,7 +66,8 @@ export function Navbar() {
         const total = data.length;
         const mastered = data.filter((q) => q.status === "Mastered").length;
         const review = data.filter((q) => q.status === "Needs Review").length;
-        setStats({ total, mastered, review });
+        const dueToday = data.filter((q) => isDueToday(q.sm2?.dueDate)).length;
+        setStats({ total, mastered, review, dueToday });
       })
       .catch((err) => console.error("Error fetching stats:", err));
   }, [pathname, activeCourse]);
@@ -75,6 +82,12 @@ export function Navbar() {
   const navLinks = [
     { href: "/", label: "Dashboard", icon: Compass },
     { href: "/questions", label: `Questions (${stats.total})`, icon: ListOrdered },
+    {
+      href: "/daily-review",
+      label: stats.dueToday > 0 ? `Daily (${stats.dueToday})` : "Daily Review",
+      icon: Flame,
+      badge: stats.dueToday > 0 ? stats.dueToday : undefined
+    },
     { href: "/concepts", label: "Concepts Hub", icon: BookOpen },
     { href: "/exam", label: "Timed Exam", icon: Timer },
     { href: "/revision", label: "Revision Sheet", icon: FileDown },
@@ -198,6 +211,17 @@ export function Navbar() {
             <span className="hidden sm:inline">Save / Load</span>
           </button>
 
+          {/* AI Settings Button */}
+          <button
+            type="button"
+            onClick={() => setIsSettingsModalOpen(true)}
+            className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 text-zinc-300 hover:text-white text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 shadow-sm"
+            title="AI Proof Reviewer & API Key Settings"
+          >
+            <Settings className="w-3.5 h-3.5 text-zinc-400" />
+            <span className="hidden sm:inline">Settings</span>
+          </button>
+
           <Link
             href="/questions"
             className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition shadow-sm flex items-center gap-1.5"
@@ -212,6 +236,12 @@ export function Navbar() {
       <SaveLoadModal
         isOpen={isSaveModalOpen}
         onClose={() => setIsSaveModalOpen(false)}
+      />
+
+      {/* AI Settings Modal */}
+      <SettingsModal
+        isOpen={isSettingsModalOpen}
+        onClose={() => setIsSettingsModalOpen(false)}
       />
     </header>
   );
