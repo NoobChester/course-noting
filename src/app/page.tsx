@@ -146,6 +146,14 @@ export default function DashboardPage() {
               <FileDown className="w-4 h-4 text-emerald-400" />
               <span>Print Cheat Sheet</span>
             </Link>
+
+            <Link
+              href="/guide"
+              className="px-4 py-2.5 rounded-xl bg-violet-950/70 hover:bg-violet-900/80 text-violet-200 font-semibold text-sm border border-violet-700/60 flex items-center gap-2 transition"
+            >
+              <Sparkles className="w-4 h-4 text-violet-400" />
+              <span>Tutorial & Guide</span>
+            </Link>
           </div>
         </div>
 

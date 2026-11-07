@@ -119,6 +119,7 @@ export function Navbar() {
 
   const navLinks = [
     { href: "/", label: "Dashboard", icon: Compass },
+    { href: "/guide", label: "Guide & Tutorial", icon: Sparkles },
     { href: "/questions", label: `Questions (${stats.total})`, icon: ListOrdered },
     {
       href: "/daily-review",
