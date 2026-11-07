@@ -14,14 +14,16 @@ import {
   Layers,
   Wand2,
   Terminal,
-  Globe
+  Globe,
+  Upload
 } from "lucide-react";
 import {
   getCourseCatalog,
   isLocalStudio,
   saveCustomCourse,
   setActiveCourseId as setStoredActiveCourseId,
-  getActiveCourseId
+  getActiveCourseId,
+  importCustomPack
 } from "@/lib/pack-loader";
 
 export default function CoursesPage() {
@@ -166,6 +168,26 @@ export default function CoursesPage() {
     }, 1500);
   };
 
+  const handleImportPackFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const content = event.target?.result as string;
+        const res = importCustomPack(content);
+        setSuccessBanner(`Successfully imported ${res.layer.toUpperCase()} pack for course ${res.courseId.toUpperCase()}! Switching course...`);
+        setTimeout(() => {
+          window.location.reload();
+        }, 1500);
+      } catch (err: any) {
+        alert(err.message || "Failed to import course pack.");
+      }
+    };
+    reader.readAsText(file);
+  };
+
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
       {/* Header */}
@@ -183,14 +205,21 @@ export default function CoursesPage() {
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setShowWizard(!showWizard)}
-          className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition flex items-center gap-2 shadow-lg shadow-indigo-600/30 cursor-pointer self-start sm:self-auto"
-        >
-          <Plus className="w-4 h-4" />
-          <span>{showWizard ? "Close Wizard" : "Create New Course Hub"}</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <label className="px-3.5 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-bold transition flex items-center gap-2 border border-zinc-700 cursor-pointer shadow-sm">
+            <Upload className="w-4 h-4 text-violet-400" />
+            <span>Import Pack (.json)</span>
+            <input type="file" accept=".json" onChange={handleImportPackFile} className="hidden" />
+          </label>
+          <button
+            type="button"
+            onClick={() => setShowWizard(!showWizard)}
+            className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition flex items-center gap-2 shadow-lg shadow-indigo-600/30 cursor-pointer self-start sm:self-auto"
+          >
+            <Plus className="w-4 h-4" />
+            <span>{showWizard ? "Close Wizard" : "Create New Course Hub"}</span>
+          </button>
+        </div>
       </div>
 
       {successBanner && (
