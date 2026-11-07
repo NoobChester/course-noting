@@ -1,7 +1,7 @@
 export interface MathSnippet {
   label: string;
   template: string;
-  category: "Calculus" | "Integrals" | "Residues" | "Fractions" | "Symbols";
+  category: "Calculus" | "Integrals" | "Residues" | "Fractions" | "Symbols" | "Linear Algebra" | string;
 }
 
 export const MATH_SNIPPETS: MathSnippet[] = [

@@ -1,0 +1,16 @@
+{
+  "id": "SAMPLE1001",
+  "code": "SAMPLE1001",
+  "name": "Linear Algebra & Multivariable Calculus (Demo)",
+  "term": "Open-Source Showcase",
+  "year": 2026,
+  "description": "An open-source demo curriculum showcasing the Course Noting study engine: interactive questions, step-by-step proof validation, KaTeX concept summaries, and lecture insights.",
+  "topics": [
+    "Linear Algebra & Matrix Transformations",
+    "Vector Calculus & Integral Theorems"
+  ],
+  "sources": [
+    "Demo Problem Set",
+    "Calculus Showcase"
+  ]
+}

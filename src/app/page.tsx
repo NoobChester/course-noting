@@ -18,23 +18,48 @@ import {
 } from "lucide-react";
 import { COURSE_CONFIG } from "@/course.config";
 import { isDueToday } from "@/lib/sm2-service";
+import { loadActiveCourseData, setActiveCourseId } from "@/lib/pack-loader";
 
 export default function DashboardPage() {
   const [questions, setQuestions] = useState<QuestionMeta[]>([]);
   const [concepts, setConcepts] = useState<Concept[]>([]);
+  const [courseInfo, setCourseInfo] = useState({
+    code: COURSE_CONFIG.code,
+    name: COURSE_CONFIG.name,
+    description: COURSE_CONFIG.description,
+    id: "sample1001"
+  });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const courseId = localStorage.getItem("math_active_course") || "math2621";
+    const courseId = localStorage.getItem("math_active_course") || "sample1001";
     Promise.all([
-      fetch(`/api/questions?course=${courseId}`, { cache: "no-store" }).then((res) => res.json()),
-      fetch(`/api/concepts?course=${courseId}`, { cache: "no-store" }).then((res) => res.json())
+      fetch(`/api/questions?course=${courseId}`, { cache: "no-store" }).then((res) => {
+        if (!res.ok) throw new Error("API not available");
+        return res.json();
+      }),
+      fetch(`/api/concepts?course=${courseId}`, { cache: "no-store" }).then((res) => {
+        if (!res.ok) throw new Error("API not available");
+        return res.json();
+      })
     ])
       .then(([qData, cData]) => {
         setQuestions(qData);
         setConcepts(cData);
       })
-      .catch((err) => console.error("Error loading dashboard data:", err))
+      .catch(async () => {
+        const merged = await loadActiveCourseData();
+        if (merged) {
+          setCourseInfo({
+            code: merged.course.code || "SAMPLE1001",
+            name: merged.course.name || "Demo Course",
+            description: merged.course.description || "",
+            id: merged.course.id
+          });
+          setQuestions(merged.questions);
+          setConcepts(merged.concepts);
+        }
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -71,15 +96,20 @@ export default function DashboardPage() {
         <div className="relative z-10 max-w-2xl space-y-4">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 text-indigo-400 text-xs font-semibold border border-indigo-500/20">
             <Flame className="w-3.5 h-3.5 text-indigo-400" />
-            <span>{COURSE_CONFIG.code} • {COURSE_CONFIG.name}</span>
+            <span>{courseInfo.code} • {courseInfo.name}</span>
+            {courseInfo.id === "sample1001" && (
+              <span className="ml-1 px-1.5 py-0.5 rounded text-[10px] bg-amber-500/20 text-amber-300 font-bold">
+                Open Demo
+              </span>
+            )}
           </div>
 
           <h1 className="text-3xl sm:text-4xl font-black text-white tracking-tight">
-            {COURSE_CONFIG.name} Study Hub
+            {courseInfo.name} Study Hub
           </h1>
 
           <p className="text-sm sm:text-base text-zinc-300 leading-relaxed">
-            {COURSE_CONFIG.description}
+            {courseInfo.description}
           </p>
 
           <div className="pt-2 flex flex-wrap items-center gap-3">
@@ -124,6 +154,34 @@ export default function DashboardPage() {
           ∮ f(z)dz
         </div>
       </div>
+
+      {courseInfo.id === "sample1001" && (
+        <div className="p-4 rounded-xl bg-indigo-950/40 border border-indigo-800/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="text-xs font-bold text-indigo-300 flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              <span>Interactive Open-Source Showcase</span>
+            </div>
+            <p className="text-xs text-zinc-400">
+              You are exploring the sample calculus and linear algebra pack. Real university courses run privately on your local machine or via JSON pack import.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Link
+              href="/questions/q-001"
+              className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition"
+            >
+              Try Question 1 →
+            </Link>
+            <Link
+              href="/lectures"
+              className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-semibold text-xs border border-zinc-700 transition"
+            >
+              Lecture Insights 🎙️
+            </Link>
+          </div>
+        </div>
+      )}
 
       {/* Progress Stats Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

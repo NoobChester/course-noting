@@ -17,10 +17,13 @@ import {
   Plus,
   Save,
   Settings,
-  Flame
+  Flame,
+  Mic,
+  Layers
 } from "lucide-react";
 import { QuestionMeta, CourseMeta } from "@/lib/types";
 import { isDueToday } from "@/lib/sm2-service";
+import { isLayer2Enabled, setLayer2Enabled, isLocalStudio, getCourseCatalog } from "@/lib/pack-loader";
 import { SaveLoadModal } from "./SaveLoadModal";
 import { SettingsModal } from "./SettingsModal";
 
@@ -28,14 +31,15 @@ export function Navbar() {
   const pathname = usePathname();
   const [courses, setCourses] = useState<CourseMeta[]>([]);
   const [activeCourse, setActiveCourse] = useState<CourseMeta>({
-    id: "math2621",
-    code: "MATH2621",
-    name: "Higher Complex Analysis",
-    logoSymbol: "∫dz"
+    id: "sample1001",
+    code: "SAMPLE1001",
+    name: "Linear Algebra & Multivariable Calculus",
+    logoSymbol: "λ"
   });
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [layer2Active, setLayer2State] = useState(true);
 
   const [stats, setStats] = useState<{ total: number; mastered: number; review: number; dueToday: number }>({
     total: 0,
@@ -45,23 +49,43 @@ export function Navbar() {
   });
 
   useEffect(() => {
-    const savedCourseId = localStorage.getItem("math_active_course") || "math2621";
+    setLayer2State(isLayer2Enabled());
+  }, []);
 
-    fetch("/api/courses")
-      .then((res) => res.json())
-      .then((courseList: CourseMeta[]) => {
+  const toggleLayer2 = () => {
+    const nextState = !layer2Active;
+    setLayer2State(nextState);
+    setLayer2Enabled(nextState);
+    window.dispatchEvent(new CustomEvent("cn_layer2_toggle", { detail: { enabled: nextState } }));
+  };
+
+  useEffect(() => {
+    const savedCourseId = localStorage.getItem("math_active_course") || "sample1001";
+
+    getCourseCatalog().then((catalog) => {
+      if (catalog && catalog.length > 0) {
+        const courseList: CourseMeta[] = catalog.map((c) => ({
+          id: c.id,
+          code: c.code,
+          name: c.name,
+          logoSymbol: c.logoSymbol || "📚",
+          description: c.description
+        }));
         setCourses(courseList);
-        const current = courseList.find((c) => c.id === savedCourseId) || courseList[0];
+        const current = courseList.find((c) => c.id.toLowerCase() === savedCourseId.toLowerCase()) || courseList[0];
         if (current) setActiveCourse(current);
-      })
-      .catch((err) => console.error("Error loading courses:", err));
+      }
+    }).catch(() => {});
   }, []);
 
   useEffect(() => {
-    const savedCourseId = localStorage.getItem("math_active_course") || "math2621";
+    const savedCourseId = localStorage.getItem("math_active_course") || "sample1001";
 
     fetch(`/api/questions?course=${savedCourseId}`)
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error("API not available");
+        return res.json();
+      })
       .then((data: QuestionMeta[]) => {
         const total = data.length;
         const mastered = data.filter((q) => q.status === "Mastered").length;
@@ -69,7 +93,21 @@ export function Navbar() {
         const dueToday = data.filter((q) => isDueToday(q.sm2?.dueDate)).length;
         setStats({ total, mastered, review, dueToday });
       })
-      .catch((err) => console.error("Error fetching stats:", err));
+      .catch(() => {
+        // Fallback to static base pack
+        fetch(`/data/${savedCourseId}_base.json`)
+          .then((r) => r.json())
+          .then((base) => {
+            const qs = base.questions || [];
+            setStats({
+              total: qs.length,
+              mastered: qs.filter((q: any) => q.status === "Mastered").length,
+              review: qs.filter((q: any) => q.status === "Needs Review").length,
+              dueToday: 0
+            });
+          })
+          .catch(() => {});
+      });
   }, [pathname, activeCourse]);
 
   const switchCourse = (c: CourseMeta) => {
@@ -89,6 +127,7 @@ export function Navbar() {
       badge: stats.dueToday > 0 ? stats.dueToday : undefined
     },
     { href: "/concepts", label: "Concepts Hub", icon: BookOpen },
+    { href: "/lectures", label: "Lectures", icon: Mic },
     { href: "/exam", label: "Timed Exam", icon: Timer },
     { href: "/revision", label: "Revision Sheet", icon: FileDown },
     { href: "/import", label: "PDF Snipper", icon: Scissors },
@@ -199,6 +238,25 @@ export function Navbar() {
               </span>
             </div>
           )}
+
+          {/* Layer 2 (Lecture Overlay) Toggle */}
+          <button
+            type="button"
+            onClick={toggleLayer2}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition cursor-pointer shadow-sm ${
+              layer2Active
+                ? "bg-violet-950/70 border-violet-500/50 text-violet-300 hover:bg-violet-900/80"
+                : "bg-zinc-900 border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-850"
+            }`}
+            title={
+              layer2Active
+                ? "Lecture Layer (Layer 2) ACTIVE: Showing lecturer intuitions & exam warnings"
+                : "Lecture Layer (Layer 2) MUTED: Showing textbook theory only"
+            }
+          >
+            <Layers className={`w-3.5 h-3.5 ${layer2Active ? "text-violet-400" : "text-zinc-500"}`} />
+            <span className="hidden md:inline">Lectures {layer2Active ? "ON" : "OFF"}</span>
+          </button>
 
           {/* Save / Load Progress Button */}
           <button

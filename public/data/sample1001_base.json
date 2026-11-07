@@ -1,0 +1,97 @@
+{
+  "version": "1.0",
+  "layer": "base",
+  "course": {
+    "id": "sample1001",
+    "code": "SAMPLE1001",
+    "name": "Linear Algebra & Multivariable Calculus (Demo)",
+    "term": "Open-Source Showcase",
+    "year": 2026,
+    "description": "An open-source demo curriculum showcasing the Course Noting study engine: interactive questions, step-by-step proof validation, KaTeX concept summaries, and lecture insights.",
+    "topics": [
+      "Linear Algebra & Matrix Transformations",
+      "Vector Calculus & Integral Theorems"
+    ],
+    "sources": [
+      "Demo Problem Set",
+      "Calculus Showcase"
+    ]
+  },
+  "concepts": [
+    {
+      "slug": "eigenvalues-and-eigenvectors",
+      "title": "Eigenvalues and Eigenvectors",
+      "week": 1,
+      "category": "General",
+      "summary": "",
+      "prerequisites": [
+        "Matrix Multiplication",
+        "Determinants"
+      ],
+      "content": "# Eigenvalues and Eigenvectors\n\n## Geometric Intuition\nWhen a square matrix $A \\in \\mathbb{R}^{n \\times n}$ acts on a vector $\\mathbf{x}$, it typically rotates, stretches, and shears it into a completely new direction. \n\nAn **eigenvector** is a special non-zero vector whose spatial direction remains invariant under the linear transformation $A$; the transformation merely scales it by a scalar factor $\\lambda$, termed the **eigenvalue**:\n\n$$A \\mathbf{v} = \\lambda \\mathbf{v}, \\quad \\mathbf{v} \\neq \\mathbf{0}$$\n\n```\n    A v\n    ^\n    |    v\n    |   ^\n    |  /\n    | /      (Eigenvector: scales without rotating)\n    +------> \n```\n\n## The Characteristic Equation\nRearranging the eigenvalue definition gives:\n\n$$(A - \\lambda I) \\mathbf{v} = \\mathbf{0}$$\n\nFor non-trivial solutions ($\\mathbf{v} \\neq \\mathbf{0}$) to exist, the nullspace of $(A - \\lambda I)$ must be non-trivial, which occurs if and only if the determinant vanishes:\n\n$$P(\\lambda) = \\det(A - \\lambda I) = 0$$\n\n$P(\\lambda)$ is the **characteristic polynomial** of degree $n$. Its roots give the eigenvalues of $A$.\n\n## Eigenspaces\nFor each eigenvalue $\\lambda_i$, the associated eigenspace $E_{\\lambda_i}$ is:\n\n$$E_{\\lambda_i} = \\ker(A - \\lambda_i I) = \\{\\mathbf{v} \\in \\mathbb{R}^n : (A - \\lambda_i I)\\mathbf{v} = \\mathbf{0}\\}$$\n\nThe dimension of $E_{\\lambda_i}$ is the **geometric multiplicity** of $\\lambda_i$, which never exceeds its algebraic multiplicity."
+    },
+    {
+      "slug": "greens-theorem",
+      "title": "Green's Theorem in the Plane",
+      "week": 1,
+      "category": "General",
+      "summary": "",
+      "prerequisites": [
+        "Line Integrals",
+        "Double Integrals",
+        "Curl"
+      ],
+      "content": "# Green's Theorem in the Plane\n\n## Formal Statement\nLet $C$ be a positively oriented (counterclockwise), piecewise smooth, simple closed curve in the $xy$-plane enclosing a compact domain $D \\subset \\mathbb{R}^2$. Let $\\mathbf{F}(x, y) = \\begin{pmatrix} L(x, y) \\\\ M(x, y) \\end{pmatrix}$ be a $C^1$ vector field defined on an open region containing $D$. Then:\n\n$$\\oint_{\\partial D} (L\\,dx + M\\,dy) = \\iint_D \\left(\\frac{\\partial M}{\\partial x} - \\frac{\\partial L}{\\partial y}\\right) dx\\,dy$$\n\n## Intuition & Microscopic Circulation\nThe integrand $\\left(\\frac{\\partial M}{\\partial x} - \\frac{\\partial L}{\\partial y}\\right)$ represents the **2D curl** $(\\operatorname{curl} \\mathbf{F}) \\cdot \\mathbf{k}$, measuring microscopic whirlpools or vorticity at each point $(x, y) \\in D$.\n\nWhen summing all microscopic circulation loops over the entire domain $D$, adjacent internal boundaries cancel out in opposite directions, leaving only the net macroscopic circulation along the perimeter curve $C = \\partial D$.\n\n## Application to Planar Area Computation\nSetting $L = -y/2$ and $M = x/2$ yields $\\frac{\\partial M}{\\partial x} - \\frac{\\partial L}{\\partial y} = \\frac{1}{2} - \\left(-\\frac{1}{2}\\right) = 1$. Consequently, the area of region $D$ can be computed purely from its boundary curve:\n\n$$\\operatorname{Area}(D) = \\frac{1}{2} \\oint_C (x\\,dy - y\\,dx)$$"
+    }
+  ],
+  "questions": [
+    {
+      "id": "q-001",
+      "number": 1,
+      "title": "Finding Eigenvalues and Eigenvectors of a 2x2 Matrix",
+      "week": 1,
+      "topic": "Linear Algebra & Matrix Transformations",
+      "difficulty": "Medium",
+      "isDifficult": false,
+      "isNonExaminable": false,
+      "status": "Unattempted",
+      "concepts": [
+        "eigenvalues-and-eigenvectors"
+      ],
+      "source": "Demo Problem Set",
+      "content": {
+        "prompt": "# Question 1: Matrix Spectral Decomposition\n\nConsider the real matrix:\n$$A = \\begin{pmatrix} 4 & 1 \\\\ 2 & 3 \\end{pmatrix}$$\n\n1. Determine the characteristic polynomial $P(\\lambda) = \\det(A - \\lambda I)$ and compute all eigenvalues.\n2. For each eigenvalue, find an associated basis vector for the corresponding eigenspace.\n3. Construct an invertible matrix $P$ and diagonal matrix $D$ such that $A = P D P^{-1}$.\n\n## Solution\n\n### Part 1: Characteristic Polynomial and Roots\nWe compute the determinant of $A - \\lambda I$:\n\n$$\\det(A - \\lambda I) = \\begin{vmatrix} 4 - \\lambda & 1 \\\\ 2 & 3 - \\lambda \\end{vmatrix} = (4 - \\lambda)(3 - \\lambda) - (1)(2)$$\n\nExpanding the polynomial:\n$$(4 - \\lambda)(3 - \\lambda) - 2 = \\lambda^2 - 7\\lambda + 12 - 2 = \\lambda^2 - 7\\lambda + 10$$\n\nFactoring gives:\n$$P(\\lambda) = (\\lambda - 5)(\\lambda - 2) = 0$$\n\nHence, the eigenvalues are:\n$$\\lambda_1 = 5, \\quad \\lambda_2 = 2$$\n\n---\n\n### Part 2: Associated Eigenvectors\n\n#### For $\\lambda_1 = 5$:\nSolve $(A - 5I)\\mathbf{v}_1 = \\mathbf{0}$:\n$$\\begin{pmatrix} 4 - 5 & 1 \\\\ 2 & 3 - 5 \\end{pmatrix} \\begin{pmatrix} x \\\\ y \\end{pmatrix} = \\begin{pmatrix} -1 & 1 \\\\ 2 & -2 \\end{pmatrix} \\begin{pmatrix} x \\\\ y \\end{pmatrix} = \\begin{pmatrix} 0 \\\\ 0 \\end{pmatrix}$$\n\nBoth rows yield $-x + y = 0 \\implies y = x$. Choosing $x = 1$:\n$$\\mathbf{v}_1 = \\begin{pmatrix} 1 \\\\ 1 \\end{pmatrix}$$\n\n#### For $\\lambda_2 = 2$:\nSolve $(A - 2I)\\mathbf{v}_2 = \\mathbf{0}$:\n$$\\begin{pmatrix} 4 - 2 & 1 \\\\ 2 & 3 - 2 \\end{pmatrix} \\begin{pmatrix} x \\\\ y \\end{pmatrix} = \\begin{pmatrix} 2 & 1 \\\\ 2 & 1 \\end{pmatrix} \\begin{pmatrix} x \\\\ y \\end{pmatrix} = \\begin{pmatrix} 0 \\\\ 0 \\end{pmatrix}$$\n\nRow reduces to $2x + y = 0 \\implies y = -2x$. Choosing $x = 1$:\n$$\\mathbf{v}_2 = \\begin{pmatrix} 1 \\\\ -2 \\end{pmatrix}$$\n\n---\n\n### Part 3: Diagonalization\nSetting $P = \\begin{pmatrix} \\mathbf{v}_1 & \\mathbf{v}_2 \\end{pmatrix}$ and $D = \\begin{pmatrix} \\lambda_1 & 0 \\\\ 0 & \\lambda_2 \\end{pmatrix}$:\n\n$$P = \\begin{pmatrix} 1 & 1 \\\\ 1 & -2 \\end{pmatrix}, \\quad D = \\begin{pmatrix} 5 & 0 \\\\ 0 & 2 \\end{pmatrix}$$\n\nSince $\\det(P) = (1)(-2) - (1)(1) = -3 \\neq 0$, $P$ is invertible and $A = P D P^{-1}$.",
+        "hints": "",
+        "solution": "",
+        "official": ""
+      },
+      "rawBody": "# Question 1: Matrix Spectral Decomposition\n\nConsider the real matrix:\n$$A = \\begin{pmatrix} 4 & 1 \\\\ 2 & 3 \\end{pmatrix}$$\n\n1. Determine the characteristic polynomial $P(\\lambda) = \\det(A - \\lambda I)$ and compute all eigenvalues.\n2. For each eigenvalue, find an associated basis vector for the corresponding eigenspace.\n3. Construct an invertible matrix $P$ and diagonal matrix $D$ such that $A = P D P^{-1}$.\n\n## Solution\n\n### Part 1: Characteristic Polynomial and Roots\nWe compute the determinant of $A - \\lambda I$:\n\n$$\\det(A - \\lambda I) = \\begin{vmatrix} 4 - \\lambda & 1 \\\\ 2 & 3 - \\lambda \\end{vmatrix} = (4 - \\lambda)(3 - \\lambda) - (1)(2)$$\n\nExpanding the polynomial:\n$$(4 - \\lambda)(3 - \\lambda) - 2 = \\lambda^2 - 7\\lambda + 12 - 2 = \\lambda^2 - 7\\lambda + 10$$\n\nFactoring gives:\n$$P(\\lambda) = (\\lambda - 5)(\\lambda - 2) = 0$$\n\nHence, the eigenvalues are:\n$$\\lambda_1 = 5, \\quad \\lambda_2 = 2$$\n\n---\n\n### Part 2: Associated Eigenvectors\n\n#### For $\\lambda_1 = 5$:\nSolve $(A - 5I)\\mathbf{v}_1 = \\mathbf{0}$:\n$$\\begin{pmatrix} 4 - 5 & 1 \\\\ 2 & 3 - 5 \\end{pmatrix} \\begin{pmatrix} x \\\\ y \\end{pmatrix} = \\begin{pmatrix} -1 & 1 \\\\ 2 & -2 \\end{pmatrix} \\begin{pmatrix} x \\\\ y \\end{pmatrix} = \\begin{pmatrix} 0 \\\\ 0 \\end{pmatrix}$$\n\nBoth rows yield $-x + y = 0 \\implies y = x$. Choosing $x = 1$:\n$$\\mathbf{v}_1 = \\begin{pmatrix} 1 \\\\ 1 \\end{pmatrix}$$\n\n#### For $\\lambda_2 = 2$:\nSolve $(A - 2I)\\mathbf{v}_2 = \\mathbf{0}$:\n$$\\begin{pmatrix} 4 - 2 & 1 \\\\ 2 & 3 - 2 \\end{pmatrix} \\begin{pmatrix} x \\\\ y \\end{pmatrix} = \\begin{pmatrix} 2 & 1 \\\\ 2 & 1 \\end{pmatrix} \\begin{pmatrix} x \\\\ y \\end{pmatrix} = \\begin{pmatrix} 0 \\\\ 0 \\end{pmatrix}$$\n\nRow reduces to $2x + y = 0 \\implies y = -2x$. Choosing $x = 1$:\n$$\\mathbf{v}_2 = \\begin{pmatrix} 1 \\\\ -2 \\end{pmatrix}$$\n\n---\n\n### Part 3: Diagonalization\nSetting $P = \\begin{pmatrix} \\mathbf{v}_1 & \\mathbf{v}_2 \\end{pmatrix}$ and $D = \\begin{pmatrix} \\lambda_1 & 0 \\\\ 0 & \\lambda_2 \\end{pmatrix}$:\n\n$$P = \\begin{pmatrix} 1 & 1 \\\\ 1 & -2 \\end{pmatrix}, \\quad D = \\begin{pmatrix} 5 & 0 \\\\ 0 & 2 \\end{pmatrix}$$\n\nSince $\\det(P) = (1)(-2) - (1)(1) = -3 \\neq 0$, $P$ is invertible and $A = P D P^{-1}$.",
+      "createdAt": "2026-11-07T00:00:00.000Z",
+      "updatedAt": "2026-11-07T00:00:00.000Z"
+    },
+    {
+      "id": "q-002",
+      "number": 2,
+      "title": "Verifying Green's Theorem over the Unit Circle",
+      "week": 1,
+      "topic": "Vector Calculus & Integral Theorems",
+      "difficulty": "Medium",
+      "isDifficult": false,
+      "isNonExaminable": false,
+      "status": "Unattempted",
+      "concepts": [
+        "greens-theorem"
+      ],
+      "source": "Calculus Showcase",
+      "content": {
+        "prompt": "# Question 2: Circulation Verification via Green's Theorem\n\nLet $C$ denote the unit circle $x^2 + y^2 = 1$ traversed counterclockwise, and let $\\mathbf{F}$ be the vector field:\n$$\\mathbf{F}(x, y) = \\begin{pmatrix} -y \\\\ x \\end{pmatrix}$$\n\n1. Evaluate the line integral $\\oint_C \\mathbf{F} \\cdot d\\mathbf{r}$ directly by parameterizing the curve $C$.\n2. Apply Green's Theorem to evaluate the line integral as a double integral over the unit disk $D = \\{(x, y) : x^2 + y^2 \\le 1\\}$.\n3. Confirm that both results agree.\n\n## Solution\n\n### Part 1: Direct Line Integral Computation\nParameterize $C$ in polar coordinates:\n$$\\mathbf{r}(t) = \\begin{pmatrix} \\cos t \\\\ \\sin t \\end{pmatrix}, \\quad t \\in [0, 2\\pi]$$\n\nThe velocity tangent vector is:\n$$d\\mathbf{r} = \\begin{pmatrix} -\\sin t \\\\ \\cos t \\end{pmatrix} dt$$\n\nEvaluating $\\mathbf{F}$ along the curve:\n$$\\mathbf{F}(\\mathbf{r}(t)) = \\begin{pmatrix} -\\sin t \\\\ \\cos t \\end{pmatrix}$$\n\nThe line integral becomes:\n$$\\oint_C \\mathbf{F} \\cdot d\\mathbf{r} = \\int_0^{2\\pi} \\begin{pmatrix} -\\sin t \\\\ \\cos t \\end{pmatrix} \\cdot \\begin{pmatrix} -\\sin t \\\\ \\cos t \\end{pmatrix} dt = \\int_0^{2\\pi} (\\sin^2 t + \\cos^2 t) dt = \\int_0^{2\\pi} 1\\,dt = 2\\pi$$\n\n---\n\n### Part 2: Green's Theorem Evaluation\nHere $L(x, y) = -y$ and $M(x, y) = x$. We calculate partial derivatives:\n$$\\frac{\\partial M}{\\partial x} = \\frac{\\partial}{\\partial x}(x) = 1$$\n$$\\frac{\\partial L}{\\partial y} = \\frac{\\partial}{\\partial y}(-y) = -1$$\n\nThus the 2D curl integrand is:\n$$\\frac{\\partial M}{\\partial x} - \\frac{\\partial L}{\\partial y} = 1 - (-1) = 2$$\n\nApplying Green's Theorem:\n$$\\oint_C (L\\,dx + M\\,dy) = \\iint_D 2\\,dA = 2 \\iint_D dA = 2 \\cdot \\operatorname{Area}(D)$$\n\nSince $D$ is the unit disk with radius $R = 1$, its area is $\\pi (1)^2 = \\pi$. Therefore:\n$$\\iint_D 2\\,dA = 2\\pi$$\n\n---\n\n### Part 3: Conclusion\nBoth the direct contour integration and the planar surface area integral yield $2\\pi$, confirming Green's Theorem.",
+        "hints": "",
+        "solution": "",
+        "official": ""
+      },
+      "rawBody": "# Question 2: Circulation Verification via Green's Theorem\n\nLet $C$ denote the unit circle $x^2 + y^2 = 1$ traversed counterclockwise, and let $\\mathbf{F}$ be the vector field:\n$$\\mathbf{F}(x, y) = \\begin{pmatrix} -y \\\\ x \\end{pmatrix}$$\n\n1. Evaluate the line integral $\\oint_C \\mathbf{F} \\cdot d\\mathbf{r}$ directly by parameterizing the curve $C$.\n2. Apply Green's Theorem to evaluate the line integral as a double integral over the unit disk $D = \\{(x, y) : x^2 + y^2 \\le 1\\}$.\n3. Confirm that both results agree.\n\n## Solution\n\n### Part 1: Direct Line Integral Computation\nParameterize $C$ in polar coordinates:\n$$\\mathbf{r}(t) = \\begin{pmatrix} \\cos t \\\\ \\sin t \\end{pmatrix}, \\quad t \\in [0, 2\\pi]$$\n\nThe velocity tangent vector is:\n$$d\\mathbf{r} = \\begin{pmatrix} -\\sin t \\\\ \\cos t \\end{pmatrix} dt$$\n\nEvaluating $\\mathbf{F}$ along the curve:\n$$\\mathbf{F}(\\mathbf{r}(t)) = \\begin{pmatrix} -\\sin t \\\\ \\cos t \\end{pmatrix}$$\n\nThe line integral becomes:\n$$\\oint_C \\mathbf{F} \\cdot d\\mathbf{r} = \\int_0^{2\\pi} \\begin{pmatrix} -\\sin t \\\\ \\cos t \\end{pmatrix} \\cdot \\begin{pmatrix} -\\sin t \\\\ \\cos t \\end{pmatrix} dt = \\int_0^{2\\pi} (\\sin^2 t + \\cos^2 t) dt = \\int_0^{2\\pi} 1\\,dt = 2\\pi$$\n\n---\n\n### Part 2: Green's Theorem Evaluation\nHere $L(x, y) = -y$ and $M(x, y) = x$. We calculate partial derivatives:\n$$\\frac{\\partial M}{\\partial x} = \\frac{\\partial}{\\partial x}(x) = 1$$\n$$\\frac{\\partial L}{\\partial y} = \\frac{\\partial}{\\partial y}(-y) = -1$$\n\nThus the 2D curl integrand is:\n$$\\frac{\\partial M}{\\partial x} - \\frac{\\partial L}{\\partial y} = 1 - (-1) = 2$$\n\nApplying Green's Theorem:\n$$\\oint_C (L\\,dx + M\\,dy) = \\iint_D 2\\,dA = 2 \\iint_D dA = 2 \\cdot \\operatorname{Area}(D)$$\n\nSince $D$ is the unit disk with radius $R = 1$, its area is $\\pi (1)^2 = \\pi$. Therefore:\n$$\\iint_D 2\\,dA = 2\\pi$$\n\n---\n\n### Part 3: Conclusion\nBoth the direct contour integration and the planar surface area integral yield $2\\pi$, confirming Green's Theorem.",
+      "createdAt": "2026-11-07T00:00:00.000Z",
+      "updatedAt": "2026-11-07T00:00:00.000Z"
+    }
+  ]
+}

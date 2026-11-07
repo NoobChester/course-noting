@@ -129,4 +129,79 @@ export interface ProofReviewResult {
   alternativeMethodNotes?: string;
 }
 
+// -------------------------------------------------------------
+// 3-Layer Architecture & Lecture Intelligence Engine Schemas
+// -------------------------------------------------------------
+
+export type LectureInsightType = "intuition" | "exam_warning" | "nuance" | "heuristic";
+
+export interface LectureInsight {
+  id?: string;
+  conceptSlug?: string;
+  type: LectureInsightType;
+  title: string;
+  timestamp?: string; // e.g. "00:24:10"
+  seconds?: number;
+  content: string; // KaTeX markdown
+}
+
+export interface QuestionHintInsight {
+  questionId: string;
+  timestamp?: string;
+  hint: string;
+}
+
+export interface LectureNoteMeta {
+  id: string;
+  week: number;
+  lectureNumber?: number;
+  title: string;
+  date?: string;
+  echo360Url?: string;
+  topics: string[];
+  sourceSlides?: string;
+  sourceTranscript?: string;
+  sourceAudio?: string;
+  linkedConcepts?: string[];
+  linkedQuestions?: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LectureNote extends LectureNoteMeta {
+  content: string; // Full markdown content
+  outline?: string[];
+  insights?: LectureInsight[];
+  questionHints?: QuestionHintInsight[];
+}
+
+/** Layer 1: Canonical Base Course Pack */
+export interface CourseBasePack {
+  version: "1.0";
+  layer: "base";
+  course: CourseMeta;
+  concepts: Concept[];
+  questions: Question[];
+}
+
+/** Layer 2: Dynamic Lecture Insights Pack */
+export interface CourseLecturePack {
+  version: "1.0";
+  layer: "lectures";
+  courseId: string;
+  lectures: LectureNote[];
+  insights: LectureInsight[];
+  questionHints: QuestionHintInsight[];
+}
+
+/** Merged runtime view of Course, Concepts, and Questions */
+export interface MergedCourseData {
+  course: CourseMeta;
+  concepts: Concept[];
+  questions: Question[];
+  lectures: LectureNote[];
+  layer2Active: boolean;
+}
+
+
 

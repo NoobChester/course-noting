@@ -54,3 +54,21 @@ __pycache__/
 !/userdata/uploads/.gitkeep
 /public/uploads/*
 !/public/uploads/.gitkeep
+
+# Echo360 auth session & local audio files (protects repo size & copyright)
+.echo360_session/
+*.pdf
+
+# Blank Slate Course Architecture:
+# Local university courses stay 100% on local machine and are NEVER committed to git
+/courses/*
+!/courses/.gitkeep
+!/courses.example/
+
+# Static data packs: allow sample demo pack & catalog, ignore real university packs
+/public/data/*
+!/public/data/catalog.json
+!/public/data/sample1001_base.json
+!/public/data/sample1001_lectures.json
+
+

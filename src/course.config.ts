@@ -11,35 +11,26 @@ export interface CourseConfig {
 }
 
 export const COURSE_CONFIG: CourseConfig = {
-  code: "MATH2621",
-  name: "Higher Complex Analysis",
-  institution: "The University of New South Wales",
-  term: "T3, 2026",
-  logoSymbol: "∫dz",
-  description: "All 131 problem sheet questions, connected theory cheat sheets, KaTeX solution workspace with handwritten image attachments, and timed mock exam preparation.",
+  code: "SAMPLE1001",
+  name: "Linear Algebra & Multivariable Calculus (Demo)",
+  institution: "Open-Source Showcase",
+  term: "Interactive Study Hub",
+  logoSymbol: "λ",
+  description: "An open-source study engine demo featuring step-by-step problem validation, KaTeX theory summaries, lecture insights, and spaced repetition review.",
   customSnippets: [
-    // Integrals & Residues
-    { label: "∮_C", template: "\\oint_C f(z) \\, dz", category: "Integrals" },
-    { label: "∫_{-∞}^∞", template: "\\int_{-\\infty}^\\infty f(x) \\, dx", category: "Integrals" },
-    { label: "∫_0^{2π}", template: "\\int_0^{2\\pi} R(\\cos\\theta, \\sin\\theta) \\, d\\theta", category: "Integrals" },
-    { label: "Res(f, z₀)", template: "\\operatorname{Res}(f, z_0)", category: "Residues" },
-    { label: "Res formula (simple)", template: "\\lim_{z \\to z_0} (z - z_0) f(z)", category: "Residues" },
-    { label: "Res formula (pole m)", template: "\\frac{1}{(m-1)!} \\lim_{z \\to z_0} \\frac{d^{m-1}}{dz^{m-1}} \\left[(z - z_0)^m f(z)\\right]", category: "Residues" },
-    { label: "2πi ∑ Res", template: "2\\pi i \\sum_{k=1}^n \\operatorname{Res}(f, z_k)", category: "Residues" },
-
-    // Cauchy-Riemann & Holomorphicity
-    { label: "∂u/∂x = ∂v/∂y", template: "\\frac{\\partial u}{\\partial x} = \\frac{\\partial v}{\\partial y}, \\quad \\frac{\\partial u}{\\partial y} = -\\frac{\\partial v}{\\partial x}", category: "Calculus" },
-    { label: "f'(z) formula", template: "f'(z) = u_x + i v_x = u_x - i u_y", category: "Calculus" },
-    { label: "CIF: f(z₀)", template: "f(z_0) = \\frac{1}{2\\pi i} \\oint_C \\frac{f(z)}{z - z_0} \\, dz", category: "Calculus" },
-    { label: "CIF: fⁿ(z₀)", template: "f^{(n)}(z_0) = \\frac{n!}{2\\pi i} \\oint_C \\frac{f(z)}{(z - z_0)^{n+1}} \\, dz", category: "Calculus" },
-
-    // Fractions & Notation
+    // Linear Algebra & Calculus
+    { label: "Av = λv", template: "A \\mathbf{v} = \\lambda \\mathbf{v}", category: "Linear Algebra" },
+    { label: "det(A - λI)", template: "\\det(A - \\lambda I) = 0", category: "Linear Algebra" },
+    { label: "Green's Thm", template: "\\oint_C (L\\,dx + M\\,dy) = \\iint_D \\left(\\frac{\\partial M}{\\partial x} - \\frac{\\partial L}{\\partial y}\\right) dA", category: "Calculus" },
+    { label: "Stokes' Thm", template: "\\oint_{\\partial S} \\mathbf{F} \\cdot d\\mathbf{r} = \\iint_S (\\nabla \\times \\mathbf{F}) \\cdot d\\mathbf{S}", category: "Calculus" },
+    { label: "Divergence Thm", template: "\\iint_{\\partial V} \\mathbf{F} \\cdot d\\mathbf{S} = \\iiint_V (\\nabla \\cdot \\mathbf{F}) \\, dV", category: "Calculus" },
+    { label: "∂u/∂x", template: "\\frac{\\partial u}{\\partial x}", category: "Calculus" },
+    { label: "∇f", template: "\\nabla f", category: "Calculus" },
+    { label: "∮_C", template: "\\oint_C \\mathbf{F} \\cdot d\\mathbf{r}", category: "Integrals" },
+    { label: "∬_D", template: "\\iint_D f(x, y) \\, dA", category: "Integrals" },
     { label: "a/b", template: "\\frac{a}{b}", category: "Fractions" },
-    { label: "Möbius", template: "\\frac{az + b}{cz + d}", category: "Fractions" },
-    { label: "√z", template: "\\sqrt{z}", category: "Symbols" },
-    { label: "∑_{n=0}^∞", template: "\\sum_{n=0}^\\infty a_n (z - z_0)^n", category: "Calculus" },
-    { label: "∑_{-∞}^∞", template: "\\sum_{n=-\\infty}^\\infty a_n (z - z_0)^n", category: "Calculus" },
-    { label: "lim_{z→z₀}", template: "\\lim_{z \\to z_0}", category: "Calculus" },
+    { label: "∑_{n=1}^∞", template: "\\sum_{n=1}^\\infty a_n", category: "Calculus" },
+    { label: "lim_{x→x₀}", template: "\\lim_{x \\to x_0}", category: "Calculus" },
 
     // Complex symbols
     { label: "z = x+iy", template: "z = x + iy", category: "Symbols" },

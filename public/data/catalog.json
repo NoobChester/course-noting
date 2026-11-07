@@ -1,0 +1,16 @@
+[
+  {
+    "id": "sample1001",
+    "code": "SAMPLE1001",
+    "name": "Linear Algebra & Multivariable Calculus (Demo)",
+    "institution": "",
+    "term": "Open-Source Showcase",
+    "logoSymbol": "\ud83d\udcda",
+    "description": "An open-source demo curriculum showcasing the Course Noting study engine: interactive questions, step-by-step proof validation, KaTeX concept summaries, and lecture insights.",
+    "questionCount": 2,
+    "conceptCount": 2,
+    "lectureCount": 1,
+    "hasBasePack": true,
+    "hasLecturePack": true
+  }
+]

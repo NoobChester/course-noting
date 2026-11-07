@@ -1,10 +1,13 @@
 {
-  "name": "math2621",
+  "name": "course-noting",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "prebuild": "python scripts/bundle_packs.py",
     "build": "next build",
+    "build:pages": "python scripts/build_pages.py",
+    "bundle": "python scripts/bundle_packs.py",
     "start": "next start",
     "lint": "eslint"
   },
