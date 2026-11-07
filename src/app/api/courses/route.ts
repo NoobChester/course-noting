@@ -28,6 +28,7 @@ export async function POST(req: Request) {
     const targetDir = path.join(COURSES_BASE_DIR, courseFolder);
     await fs.mkdir(path.join(targetDir, "questions"), { recursive: true });
     await fs.mkdir(path.join(targetDir, "concepts"), { recursive: true });
+    await fs.mkdir(path.join(targetDir, "lectures"), { recursive: true });
 
     const newCourse: CourseMeta = {
       ...body,
