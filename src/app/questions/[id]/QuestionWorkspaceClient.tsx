@@ -10,6 +10,7 @@ import { ConceptDrawer } from "@/components/concepts/ConceptDrawer";
 import { ScratchpadCanvas } from "@/components/canvas/ScratchpadCanvas";
 import { calculateNextSM2, getIntervalPreview, isDueToday } from "@/lib/sm2-service";
 import { loadActiveCourseData, getActiveCourseId, isLocalStudio } from "@/lib/pack-loader";
+import { auditProofWithGemini } from "@/lib/gemini-client";
 import confetti from "canvas-confetti";
 import {
   ArrowLeft,
@@ -285,6 +286,42 @@ export function QuestionWorkspaceClient({ id }: { id: string }) {
           ? aiSettings.anthropicKey
           : undefined;
 
+      // On GitHub Pages (Static Mode)
+      if (!isLocalStudio()) {
+        if (aiSettings.provider === "ollama") {
+          throw new Error(
+            "Local Ollama requires Localhost Studio (http://localhost:3000). On static GitHub Pages, web browsers block connections to local endpoints (http://localhost:11434). Please switch to Google Gemini (Free Tier) in Settings, or run 'npm run dev' on your computer."
+          );
+        }
+
+        if (aiSettings.provider === "gemini") {
+          if (!apiKey || !apiKey.trim()) {
+            throw new Error(
+              "Please configure your Google Gemini API key in Settings (Gear icon in top navigation) first. You can get a free key instantly at aistudio.google.com."
+            );
+          }
+
+          const result = await auditProofWithGemini({
+            prompt: question?.content.prompt || "",
+            official: question?.content.official,
+            studentSolution: solutionText,
+            apiKey: apiKey.trim()
+          });
+
+          setReviewResult(result);
+          setIsReviewOpen(true);
+          if (question) {
+            setQuestion({ ...question, lastProofReview: result });
+          }
+          return;
+        }
+
+        throw new Error(
+          `Direct browser execution for ${aiSettings.provider.toUpperCase()} is not available on static GitHub Pages. Please switch to Google Gemini (Free Tier) or run 'npm run dev' locally.`
+        );
+      }
+
+      // Local Studio: Call local Node API proxy
       const res = await fetch("/api/ai/review", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -299,11 +336,16 @@ export function QuestionWorkspaceClient({ id }: { id: string }) {
         })
       });
 
-      const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || "Proof review request failed");
+        let errorMsg = "Proof review request failed";
+        try {
+          const errData = await res.json();
+          errorMsg = errData.error || errorMsg;
+        } catch {}
+        throw new Error(errorMsg);
       }
 
+      const data = await res.json();
       setReviewResult(data.result);
       setIsReviewOpen(true);
 
@@ -312,7 +354,7 @@ export function QuestionWorkspaceClient({ id }: { id: string }) {
       }
     } catch (err: any) {
       console.error(err);
-      alert(err.message || "Failed to audit proof. Please check your API key in Settings (Gear icon in top navigation).");
+      alert(err.message || "Failed to audit proof. Please check your AI settings.");
     } finally {
       setIsReviewing(false);
     }

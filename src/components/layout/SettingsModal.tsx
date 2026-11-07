@@ -15,6 +15,8 @@ import {
   EyeOff
 } from "lucide-react";
 import { AIProvider, AISettings } from "@/lib/types";
+import { isLocalStudio } from "@/lib/pack-loader";
+import { testGeminiKey } from "@/lib/gemini-client";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -36,8 +38,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [isLocal, setIsLocal] = useState(true);
 
   useEffect(() => {
+    setIsLocal(isLocalStudio());
     if (isOpen) {
       setTestResult(null);
       setSavedSuccess(false);
@@ -97,6 +101,37 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       return;
     }
 
+    // Client-side execution on GitHub Pages
+    if (!isLocal) {
+      if (settings.provider === "ollama") {
+        setTesting(false);
+        setTestResult({
+          success: false,
+          message:
+            "Local Ollama is only available in Localhost Studio (http://localhost:3000). On static GitHub Pages, browsers block connections to local endpoints (http://localhost:11434). Please switch to Google Gemini (Free Tier) to use AI on GitHub Pages, or run 'npm run dev' on your computer."
+        });
+        return;
+      }
+
+      if (settings.provider === "gemini") {
+        const result = await testGeminiKey(currentKey?.trim() || "");
+        setTesting(false);
+        if (result.success) {
+          setTestResult({
+            success: true,
+            message: `Connection successful! Google Gemini 1.5 Flash responded in ${result.latencyMs}ms directly in browser.`
+          });
+        } else {
+          setTestResult({
+            success: false,
+            message: result.error || "Failed to reach Google Gemini API."
+          });
+        }
+        return;
+      }
+    }
+
+    // Local Studio Node API execution
     try {
       const res = await fetch("/api/ai/test", {
         method: "POST",
@@ -109,8 +144,23 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         })
       });
 
+      if (!res.ok) {
+        if (res.status === 404) {
+          throw new Error(
+            settings.provider === "ollama"
+              ? "Local Ollama requires Localhost Studio (npm run dev). On static GitHub Pages, there is no local backend to connect to http://localhost:11434. Please switch to Google Gemini (Free Tier) in Settings."
+              : "API endpoint not found on static GitHub Pages. Please switch to Google Gemini (Free Tier) or run locally."
+          );
+        }
+        let errMsg = "Connection test failed";
+        try {
+          const errData = await res.json();
+          errMsg = errData.error || errMsg;
+        } catch {}
+        throw new Error(errMsg);
+      }
+
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Connection test failed");
 
       setTestResult({
         success: true,
@@ -332,6 +382,21 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
           {settings.provider === "ollama" && (
             <div className="space-y-3">
+              {!isLocal && (
+                <div className="p-3 rounded-xl bg-amber-950/40 border border-amber-800/50 text-[11px] text-amber-300 space-y-1.5">
+                  <div className="font-bold flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                    <span>Localhost Studio Required for Ollama</span>
+                  </div>
+                  <p className="text-zinc-300 leading-relaxed">
+                    You are viewing Course Noting on GitHub Pages. Web browsers block websites loaded over HTTPS from connecting to local unencrypted ports (<code className="text-amber-200">http://localhost:11434</code>).
+                  </p>
+                  <p className="text-zinc-400">
+                    To use Local Ollama, run <code className="text-indigo-300">npm run dev</code> on your computer (http://localhost:3000), or switch to <strong>Google Gemini (Free Tier)</strong> which works directly in the browser!
+                  </p>
+                </div>
+              )}
+
               <div className="space-y-1">
                 <label className="text-xs font-bold text-zinc-300">Ollama Server Endpoint</label>
                 <input
