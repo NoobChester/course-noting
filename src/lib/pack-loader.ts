@@ -33,7 +33,30 @@ export interface CourseCatalogItem {
 
 const STORAGE_ACTIVE_COURSE = "math_active_course";
 const STORAGE_CUSTOM_PACKS_PREFIX = "cn_custom_pack_";
+const STORAGE_CUSTOM_COURSES_LIST = "cn_custom_courses_list";
 const STORAGE_LAYER2_ENABLED = "cn_layer2_enabled";
+
+/** Get list of user-created custom courses from localStorage */
+export function getCustomCourseList(): CourseMeta[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(STORAGE_CUSTOM_COURSES_LIST);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Save a user-created custom course and its base pack to localStorage */
+export function saveCustomCourse(meta: CourseMeta, basePack: CourseBasePack) {
+  if (typeof window === "undefined") return;
+  const courseId = meta.id.toLowerCase();
+  localStorage.setItem(`${STORAGE_CUSTOM_PACKS_PREFIX}${courseId}_base`, JSON.stringify(basePack));
+  const existing = getCustomCourseList().filter((c) => c.id.toLowerCase() !== courseId);
+  existing.push(meta);
+  localStorage.setItem(STORAGE_CUSTOM_COURSES_LIST, JSON.stringify(existing));
+  setActiveCourseId(courseId);
+}
 
 /** Detect if running in local Node dev mode vs static GitHub Pages */
 export function isLocalStudio(): boolean {
@@ -53,13 +76,48 @@ export function getBasePath(): string {
 
 /** Fetch the pre-bundled course catalog */
 export async function getCourseCatalog(): Promise<CourseCatalogItem[]> {
+  const customItems: CourseCatalogItem[] = getCustomCourseList().map((c) => {
+    let qCount = 0;
+    try {
+      const packRaw = localStorage.getItem(`${STORAGE_CUSTOM_PACKS_PREFIX}${c.id.toLowerCase()}_base`);
+      if (packRaw) {
+        const parsed = JSON.parse(packRaw);
+        qCount = parsed.questions?.length || 0;
+      }
+    } catch {}
+    return {
+      id: c.id,
+      code: c.code,
+      name: c.name,
+      institution: c.institution,
+      term: c.term,
+      logoSymbol: c.logoSymbol || "📚",
+      description: c.description || "",
+      questionCount: qCount,
+      conceptCount: 0,
+      lectureCount: 0,
+      hasBasePack: true,
+      hasLecturePack: false
+    };
+  });
+
   try {
     const res = await fetch(`${getBasePath()}/data/catalog.json`, { cache: "no-cache" });
     if (!res.ok) throw new Error("Catalog fetch failed");
-    return await res.json();
+    const staticCatalog: CourseCatalogItem[] = await res.json();
+    const seen = new Set<string>();
+    const merged: CourseCatalogItem[] = [];
+    for (const item of [...customItems, ...staticCatalog]) {
+      if (!seen.has(item.id.toLowerCase())) {
+        seen.add(item.id.toLowerCase());
+        merged.push(item);
+      }
+    }
+    return merged;
   } catch (err) {
     console.warn("Failed to fetch /data/catalog.json, falling back to defaults:", err);
     return [
+      ...customItems,
       {
         id: "sample1001",
         code: "SAMPLE1001",

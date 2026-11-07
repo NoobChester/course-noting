@@ -40,6 +40,7 @@ export function Navbar() {
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [layer2Active, setLayer2State] = useState(true);
+  const [isLocal, setIsLocal] = useState(false);
 
   const [stats, setStats] = useState<{ total: number; mastered: number; review: number; dueToday: number }>({
     total: 0,
@@ -50,6 +51,7 @@ export function Navbar() {
 
   useEffect(() => {
     setLayer2State(isLayer2Enabled());
+    setIsLocal(isLocalStudio());
   }, []);
 
   const toggleLayer2 = () => {
@@ -131,7 +133,7 @@ export function Navbar() {
     { href: "/lectures", label: "Lectures", icon: Mic },
     { href: "/exam", label: "Timed Exam", icon: Timer },
     { href: "/revision", label: "Revision Sheet", icon: FileDown },
-    { href: "/import", label: "PDF Snipper", icon: Scissors },
+    { href: "/import", label: "PDF Snipper", icon: Scissors, localOnly: true },
     { href: "/courses", label: "Courses", icon: GraduationCap }
   ];
 
@@ -207,19 +209,28 @@ export function Navbar() {
             const Icon = item.icon;
             const isActive =
               item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+            const isDimmed = (item as any).localOnly && !isLocal;
 
             return (
               <Link
                 key={item.href}
                 href={item.href}
+                title={isDimmed ? "Local Studio Only: In-app PDF snipping requires local Node environment" : undefined}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
                   isActive
                     ? "bg-indigo-600 text-white shadow-sm"
+                    : isDimmed
+                    ? "text-zinc-500 opacity-60 hover:opacity-100 hover:bg-zinc-900"
                     : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900"
                 }`}
               >
                 <Icon className="w-3.5 h-3.5" />
                 <span>{item.label}</span>
+                {isDimmed && (
+                  <span className="text-[9px] px-1 py-0.2 rounded bg-zinc-800 text-amber-400/90 font-mono border border-zinc-700/60">
+                    Local
+                  </span>
+                )}
               </Link>
             );
           })}

@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { CourseMeta } from "@/lib/types";
+import { CourseMeta, CourseBasePack, Question } from "@/lib/types";
 import {
   GraduationCap,
   Plus,
@@ -12,14 +12,24 @@ import {
   BookOpen,
   Sparkles,
   Layers,
-  Wand2
+  Wand2,
+  Terminal,
+  Globe
 } from "lucide-react";
+import {
+  getCourseCatalog,
+  isLocalStudio,
+  saveCustomCourse,
+  setActiveCourseId as setStoredActiveCourseId,
+  getActiveCourseId
+} from "@/lib/pack-loader";
 
 export default function CoursesPage() {
   const router = useRouter();
   const [courses, setCourses] = useState<CourseMeta[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeCourseId, setActiveCourseId] = useState("math2621");
+  const [activeCourseId, setActiveCourseId] = useState("sample1001");
+  const [isLocal, setIsLocal] = useState(false);
 
   // Creation Wizard Form
   const [showWizard, setShowWizard] = useState(false);
@@ -30,20 +40,32 @@ export default function CoursesPage() {
   const [preset, setPreset] = useState("calculus");
   const [pasteQuestions, setPasteQuestions] = useState("");
   const [isCreating, setIsCreating] = useState(false);
+  const [successBanner, setSuccessBanner] = useState("");
 
   useEffect(() => {
-    const saved = localStorage.getItem("math_active_course") || "math2621";
+    setIsLocal(isLocalStudio());
+    const saved = getActiveCourseId();
     setActiveCourseId(saved);
 
-    fetch("/api/courses")
-      .then((res) => res.json())
-      .then((data: CourseMeta[]) => setCourses(data))
-      .catch((err) => console.error(err))
+    getCourseCatalog()
+      .then((catalog) => {
+        const mapped: CourseMeta[] = catalog.map((c) => ({
+          id: c.id,
+          code: c.code,
+          name: c.name,
+          institution: c.institution || "",
+          term: c.term || "",
+          logoSymbol: c.logoSymbol || "📚",
+          description: c.description
+        }));
+        setCourses(mapped);
+      })
+      .catch((err) => console.error("Error loading courses:", err))
       .finally(() => setLoading(false));
   }, []);
 
   const selectActiveCourse = (courseId: string) => {
-    localStorage.setItem("math_active_course", courseId);
+    setStoredActiveCourseId(courseId);
     setActiveCourseId(courseId);
     window.location.href = "/";
   };
@@ -64,61 +86,84 @@ export default function CoursesPage() {
       name,
       term,
       institution,
-      preset
+      preset,
+      logoSymbol: "📚",
+      description: `${name} (${code.toUpperCase()})`
     };
 
-    try {
-      const res = await fetch("/api/courses", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newCourse)
-      });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || "Failed to create course");
+    // Parse any pasted questions
+    const parsedQuestions: Question[] = [];
+    if (pasteQuestions.trim()) {
+      const blocks = pasteQuestions.split(/\n(?=(?:Question|Problem|\d+[\.\)]))/i);
+      let qNum = 1;
+      for (const block of blocks) {
+        if (!block.trim()) continue;
+        parsedQuestions.push({
+          id: `q-${String(qNum).padStart(3, "0")}`,
+          number: qNum,
+          title: `Problem ${qNum}`,
+          week: Math.min(10, Math.floor((qNum - 1) / 10) + 1),
+          topic: "Problem Sheet",
+          difficulty: 2,
+          status: "Unattempted",
+          concepts: [],
+          source: `${code.toUpperCase()} Sheet`,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          rawBody: block.trim(),
+          content: {
+            prompt: block.trim(),
+            hints: "",
+            solution: "",
+            official: ""
+          }
+        });
+        qNum++;
       }
-
-      // If user pasted questions, trigger question creation
-      if (pasteQuestions.trim()) {
-        const lines = pasteQuestions.split(/\n(?=(?:Question|Problem|\d+[\.\)]))/i);
-        let qNum = 1;
-        for (const block of lines) {
-          if (!block.trim()) continue;
-          await fetch(`/api/questions?course=${courseId}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              id: `q-${String(qNum).padStart(3, "0")}`,
-              number: qNum,
-              title: `Problem ${qNum}`,
-              week: Math.min(10, Math.floor((qNum - 1) / 10) + 1),
-              topic: "Problem Sheet",
-              difficulty: 2,
-              status: "Unattempted",
-              concepts: [],
-              source: `${code.toUpperCase()} Sheet`,
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-              content: {
-                prompt: block.trim(),
-                hints: "",
-                solution: "",
-                official: ""
-              }
-            })
-          });
-          qNum++;
-        }
-      }
-
-      localStorage.setItem("math_active_course", courseId);
-      window.location.href = "/";
-    } catch (err: any) {
-      alert(err.message || "Error creating course");
-    } finally {
-      setIsCreating(false);
     }
+
+    const basePack: CourseBasePack = {
+      version: "1.0",
+      layer: "base",
+      course: newCourse,
+      concepts: [],
+      questions: parsedQuestions
+    };
+
+    // If running in local dev with API available, attempt backend creation
+    if (isLocal) {
+      try {
+        const res = await fetch("/api/courses", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(newCourse)
+        });
+
+        if (res.ok) {
+          for (const q of parsedQuestions) {
+            await fetch(`/api/questions?course=${courseId}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(q)
+            }).catch(() => {});
+          }
+        }
+      } catch (e) {
+        console.warn("Backend creation failed, falling back to browser storage:", e);
+      }
+    }
+
+    // Always persist to client-side localStorage as well (works seamlessly on GitHub Pages)
+    saveCustomCourse(newCourse, basePack);
+    setCourses((prev) => [newCourse, ...prev.filter((c) => c.id !== courseId)]);
+    setStoredActiveCourseId(courseId);
+    setActiveCourseId(courseId);
+    setIsCreating(false);
+    setShowWizard(false);
+    setSuccessBanner(`Course ${newCourse.code} created successfully and activated!`);
+    setTimeout(() => {
+      window.location.href = "/";
+    }, 1500);
   };
 
   return (
@@ -147,6 +192,30 @@ export default function CoursesPage() {
           <span>{showWizard ? "Close Wizard" : "Create New Course Hub"}</span>
         </button>
       </div>
+
+      {successBanner && (
+        <div className="p-4 rounded-xl bg-emerald-950/70 border border-emerald-500/50 text-emerald-300 text-xs font-bold flex items-center gap-2 animate-in fade-in">
+          <CheckCircle className="w-4 h-4 text-emerald-400" />
+          <span>{successBanner}</span>
+        </div>
+      )}
+
+      {/* Mode Indicator Banner */}
+      {!isLocal ? (
+        <div className="p-4 rounded-xl bg-indigo-950/40 border border-indigo-800/40 flex items-start gap-3">
+          <Globe className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+          <div className="text-xs text-zinc-300 space-y-0.5">
+            <span className="font-bold text-indigo-300">Online Browser Mode:</span> Courses created here are saved directly to your browser&apos;s local storage and can be exported as <code className="text-zinc-200">.json</code> packs. To persist permanent course folders on your PC filesystem, run in <Link href="/guide" className="text-indigo-400 underline font-semibold">Local Studio mode</Link>.
+          </div>
+        </div>
+      ) : (
+        <div className="p-4 rounded-xl bg-emerald-950/40 border border-emerald-800/40 flex items-start gap-3">
+          <Terminal className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+          <div className="text-xs text-zinc-300">
+            <span className="font-bold text-emerald-300">Local Studio Connected:</span> Courses created here are written directly to your local <code className="text-zinc-200">courses/</code> directory on disk.
+          </div>
+        </div>
+      )}
 
       {/* Course Creation Wizard Form */}
       {showWizard && (
