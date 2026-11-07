@@ -9,7 +9,7 @@ import { SplitEditor } from "@/components/math/SplitEditor";
 import { ConceptDrawer } from "@/components/concepts/ConceptDrawer";
 import { ScratchpadCanvas } from "@/components/canvas/ScratchpadCanvas";
 import { calculateNextSM2, getIntervalPreview, isDueToday } from "@/lib/sm2-service";
-import { loadActiveCourseData } from "@/lib/pack-loader";
+import { loadActiveCourseData, getActiveCourseId, isLocalStudio } from "@/lib/pack-loader";
 import confetti from "canvas-confetti";
 import {
   ArrowLeft,
@@ -155,7 +155,7 @@ export function QuestionWorkspaceClient({ id }: { id: string }) {
     setSaving(true);
     setSaveMessage("Saving...");
 
-    const courseId = localStorage.getItem("math_active_course") || "math2621";
+    const courseId = getActiveCourseId();
     const updatedPayload: Question = {
       ...question,
       ...updatedFields,
@@ -217,7 +217,7 @@ export function QuestionWorkspaceClient({ id }: { id: string }) {
     setQuestion({ ...question, starred: newStarred });
 
     try {
-      const courseId = localStorage.getItem("math_active_course") || "math2621";
+      const courseId = getActiveCourseId();
       await fetch(`/api/questions/${id}?course=${courseId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -267,7 +267,7 @@ export function QuestionWorkspaceClient({ id }: { id: string }) {
     setReviewResult(null);
 
     try {
-      const courseId = localStorage.getItem("math_active_course") || "math2621";
+      const courseId = getActiveCourseId();
 
       // Load AI settings from localStorage
       let aiSettings: AISettings = { provider: "gemini" };

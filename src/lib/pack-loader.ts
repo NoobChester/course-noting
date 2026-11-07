@@ -58,6 +58,44 @@ export function saveCustomCourse(meta: CourseMeta, basePack: CourseBasePack) {
   setActiveCourseId(courseId);
 }
 
+/** Append or update a single question in a custom course's base pack in localStorage */
+export function saveQuestionToCustomCourse(courseId: string, question: Question) {
+  if (typeof window === "undefined") return;
+  const cleanId = courseId.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const packRaw = localStorage.getItem(`${STORAGE_CUSTOM_PACKS_PREFIX}${cleanId}_base`);
+  let pack: CourseBasePack;
+  if (packRaw) {
+    try {
+      pack = JSON.parse(packRaw);
+    } catch {
+      pack = {
+        version: "1.0",
+        layer: "base",
+        course: { id: cleanId, code: cleanId.toUpperCase(), name: cleanId.toUpperCase() },
+        questions: [],
+        concepts: []
+      };
+    }
+  } else {
+    pack = {
+      version: "1.0",
+      layer: "base",
+      course: { id: cleanId, code: cleanId.toUpperCase(), name: cleanId.toUpperCase() },
+      questions: [],
+      concepts: []
+    };
+  }
+
+  const existingIdx = pack.questions.findIndex((q) => q.id === question.id);
+  if (existingIdx >= 0) {
+    pack.questions[existingIdx] = question;
+  } else {
+    pack.questions.push(question);
+  }
+
+  localStorage.setItem(`${STORAGE_CUSTOM_PACKS_PREFIX}${cleanId}_base`, JSON.stringify(pack));
+}
+
 /** Detect if running in local Node dev mode vs static GitHub Pages */
 export function isLocalStudio(): boolean {
   if (typeof window === "undefined") return false;

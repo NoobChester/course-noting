@@ -1,14 +1,37 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Question } from "@/lib/types";
+import { Question, QuestionMeta, CourseMeta } from "@/lib/types";
 import { MathToolbar } from "@/components/math/MathToolbar";
 import { MathRenderer } from "@/components/math/MathRenderer";
-import { Scissors, Upload, Plus, CheckCircle, Image as ImageIcon } from "lucide-react";
+import {
+  Scissors,
+  Upload,
+  Plus,
+  CheckCircle,
+  Image as ImageIcon,
+  Info,
+  Terminal,
+  Globe,
+  HardDrive,
+  HelpCircle,
+  ArrowRight
+} from "lucide-react";
+import {
+  isLocalStudio,
+  getActiveCourseId,
+  loadActiveCourseData,
+  saveQuestionToCustomCourse
+} from "@/lib/pack-loader";
 
 export default function ImportPage() {
   const router = useRouter();
+  const [isLocal, setIsLocal] = useState(true);
+  const [courseId, setCourseId] = useState("sample1001");
+  const [courseMeta, setCourseMeta] = useState<CourseMeta | null>(null);
+  const [existingQuestions, setExistingQuestions] = useState<QuestionMeta[]>([]);
 
   // Image & Canvas Snipping
   const [imageSrc, setImageSrc] = useState<string | null>(null);
@@ -22,14 +45,55 @@ export default function ImportPage() {
 
   // Question Form State
   const [title, setTitle] = useState("");
-  const [number, setNumber] = useState(132);
-  const [topic, setTopic] = useState("Residue Calculus");
-  const [week, setWeek] = useState(8);
+  const [number, setNumber] = useState(1);
+  const [topic, setTopic] = useState("General Practice");
+  const [week, setWeek] = useState(1);
   const [difficulty, setDifficulty] = useState(3);
   const [prompt, setPrompt] = useState("");
   const [hints, setHints] = useState("");
   const [official, setOfficial] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    setIsLocal(isLocalStudio());
+    const active = getActiveCourseId();
+    setCourseId(active);
+
+    fetch(`/api/questions?course=${active}`)
+      .then((res) => {
+        if (!res.ok) throw new Error("API not available");
+        return res.json();
+      })
+      .then((data: QuestionMeta[]) => {
+        setExistingQuestions(data);
+        if (data.length > 0) {
+          setNumber(data.length + 1);
+          if (data[data.length - 1].topic) setTopic(data[data.length - 1].topic);
+          if (data[data.length - 1].week) setWeek(data[data.length - 1].week);
+        }
+      })
+      .catch(async () => {
+        const merged = await loadActiveCourseData();
+        if (merged) {
+          setCourseMeta(merged.course);
+          setExistingQuestions(merged.questions);
+          if (merged.questions.length > 0) {
+            setNumber(merged.questions.length + 1);
+            const last = merged.questions[merged.questions.length - 1];
+            if (last.topic) setTopic(last.topic);
+            if (last.week) setWeek(last.week);
+          }
+        }
+      });
+  }, []);
+
+  const availableTopics = useMemo(() => {
+    const set = new Set<string>();
+    existingQuestions.forEach((q) => {
+      if (q.topic) set.add(q.topic);
+    });
+    return Array.from(set).sort();
+  }, [existingQuestions]);
 
   // File upload for snipper
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -70,12 +134,14 @@ export default function ImportPage() {
     const x = (e.clientX - r.left) * scaleX;
     const y = (e.clientY - r.top) * scaleY;
 
-    setStartPos({ x, y });
     setIsDrawing(true);
+    setStartPos({ x, y });
+    setRect({ x, y, w: 0, h: 0 });
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!isDrawing || !startPos || !canvasRef.current || !imgRef.current) return;
+
     const r = canvasRef.current.getBoundingClientRect();
     const scaleX = canvasRef.current.width / r.width;
     const scaleY = canvasRef.current.height / r.height;
@@ -83,32 +149,40 @@ export default function ImportPage() {
     const curX = (e.clientX - r.left) * scaleX;
     const curY = (e.clientY - r.top) * scaleY;
 
-    const x = Math.min(startPos.x, curX);
-    const y = Math.min(startPos.y, curY);
-    const w = Math.abs(curX - startPos.x);
-    const h = Math.abs(curY - startPos.y);
+    const w = curX - startPos.x;
+    const h = curY - startPos.y;
 
-    setRect({ x, y, w, h });
+    const currentRect = {
+      x: w < 0 ? curX : startPos.x,
+      y: h < 0 ? curY : startPos.y,
+      w: Math.abs(w),
+      h: Math.abs(h)
+    };
+    setRect(currentRect);
 
-    // Redraw image and bounding box
+    // Redraw base image and highlight rectangle
     const ctx = canvasRef.current.getContext("2d");
     if (!ctx) return;
+    ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
     ctx.drawImage(imgRef.current, 0, 0);
+
+    // Selection box overlay
     ctx.strokeStyle = "#6366f1";
     ctx.lineWidth = 3;
-    ctx.strokeRect(x, y, w, h);
-    ctx.fillStyle = "rgba(99, 102, 241, 0.15)";
-    ctx.fillRect(x, y, w, h);
+    ctx.strokeRect(currentRect.x, currentRect.y, currentRect.w, currentRect.h);
+
+    ctx.fillStyle = "rgba(99, 102, 241, 0.2)";
+    ctx.fillRect(currentRect.x, currentRect.y, currentRect.w, currentRect.h);
   };
 
-  const handleMouseUp = async () => {
+  const handleMouseUp = () => {
     if (!isDrawing || !rect || rect.w < 10 || rect.h < 10 || !imgRef.current) {
       setIsDrawing(false);
       return;
     }
     setIsDrawing(false);
 
-    // Create snippet canvas
+    // Create a temporary canvas for cropped region
     const cropCanvas = document.createElement("canvas");
     cropCanvas.width = rect.w;
     cropCanvas.height = rect.h;
@@ -127,23 +201,29 @@ export default function ImportPage() {
       rect.h
     );
 
-    cropCanvas.toBlob(async (blob) => {
-      if (!blob) return;
-      const file = new File([blob], `snip-${Date.now()}.png`, { type: "image/png" });
-      const formData = new FormData();
-      formData.append("file", file);
+    if (isLocal) {
+      cropCanvas.toBlob(async (blob) => {
+        if (!blob) return;
+        const file = new File([blob], `snip-${Date.now()}.png`, { type: "image/png" });
+        const formData = new FormData();
+        formData.append("file", file);
 
-      try {
-        const res = await fetch("/api/upload", {
-          method: "POST",
-          body: formData
-        });
-        const data = await res.json();
-        setSnipPreview(data.url);
-      } catch (err) {
-        console.error("Failed to upload snippet:", err);
-      }
-    });
+        try {
+          const res = await fetch("/api/upload", {
+            method: "POST",
+            body: formData
+          });
+          const data = await res.json();
+          setSnipPreview(data.url);
+        } catch {
+          // Fallback to data URL
+          setSnipPreview(cropCanvas.toDataURL("image/png"));
+        }
+      });
+    } else {
+      // In browser / GitHub Pages: Save as data URL
+      setSnipPreview(cropCanvas.toDataURL("image/png"));
+    }
   };
 
   const handleSaveQuestion = async (e: React.FormEvent) => {
@@ -178,20 +258,27 @@ export default function ImportPage() {
       }
     };
 
-    try {
-      const res = await fetch("/api/questions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newQuestion)
-      });
+    if (isLocal) {
+      try {
+        const res = await fetch(`/api/questions?course=${courseId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(newQuestion)
+        });
 
-      if (!res.ok) throw new Error("Failed to save");
-      router.push(`/questions/${id}`);
-    } catch (err) {
-      alert("Error saving imported question");
-      console.error(err);
-    } finally {
+        if (!res.ok) throw new Error("API post failed");
+        router.push(`/questions/${id}`);
+      } catch (err) {
+        console.warn("API write failed, saving to local custom course:", err);
+        saveQuestionToCustomCourse(courseId, newQuestion);
+        router.push(`/questions/${id}`);
+      } finally {
+        setIsSaving(false);
+      }
+    } else {
+      saveQuestionToCustomCourse(courseId, newQuestion);
       setIsSaving(false);
+      router.push(`/questions/${id}`);
     }
   };
 
@@ -207,8 +294,61 @@ export default function ImportPage() {
           In-App PDF / Image Question Snipper
         </h1>
         <p className="text-xs sm:text-sm text-zinc-400 mt-1">
-          Upload problem sheets or exam pages, drag to crop questions directly into high-res images, and import them straight into your question bank.
+          Upload problem sheets or exam pages, drag to crop questions directly into high-res images, and import them straight into {courseMeta ? courseMeta.code : "your question bank"}.
         </p>
+      </div>
+
+      {/* Local Studio vs GitHub Pages Notice Banner */}
+      <div className="p-5 rounded-2xl bg-zinc-900/90 border border-zinc-800 shadow-xl space-y-3">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
+              <Info className="w-4 h-4" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-zinc-100 flex items-center gap-2">
+                <span>Why does PDF Snipper say</span>
+                <span className="text-[10px] px-2 py-0.5 rounded bg-amber-950 text-amber-300 font-mono font-medium border border-amber-800/40">
+                  Local Studio
+                </span>
+                <span>in the navigation bar?</span>
+              </h3>
+              <p className="text-xs text-zinc-400">
+                Understanding what works in your browser vs running on your local machine.
+              </p>
+            </div>
+          </div>
+
+          <Link
+            href="/guide#local-studio"
+            className="px-3.5 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold flex items-center gap-1.5 transition border border-zinc-700 shrink-0"
+          >
+            <Terminal className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Local Studio Guide</span>
+          </Link>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2 border-t border-zinc-800/80 text-xs">
+          <div className="p-3 rounded-xl bg-zinc-950/60 border border-zinc-800 space-y-1">
+            <div className="font-bold text-amber-400 flex items-center gap-1.5">
+              <Globe className="w-3.5 h-3.5" />
+              <span>On GitHub Pages (Static Web App)</span>
+            </div>
+            <p className="text-zinc-400 leading-relaxed text-[11px]">
+              Runs 100% client-side in your browser without a backend. You can upload or paste screenshot images right here; cropped snippets and imported questions are saved into browser <code className="text-zinc-300">localStorage</code> and can be exported via the Save/Backup manager.
+            </p>
+          </div>
+
+          <div className="p-3 rounded-xl bg-zinc-950/60 border border-zinc-800 space-y-1">
+            <div className="font-bold text-indigo-400 flex items-center gap-1.5">
+              <HardDrive className="w-3.5 h-3.5" />
+              <span>On Localhost Studio (Your Computer)</span>
+            </div>
+            <p className="text-zinc-400 leading-relaxed text-[11px]">
+              Running <code className="text-indigo-300">npm run dev</code> unlocks direct filesystem storage: automatically renders multi-page PDF problem sheets, saves cropped PNG files to <code className="text-zinc-300">public/uploads/</code>, and creates persistent Markdown question files on your hard drive.
+            </p>
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -245,7 +385,7 @@ export default function ImportPage() {
             <div className="p-16 text-center rounded-xl border border-dashed border-zinc-800 bg-zinc-950/60 space-y-3">
               <Scissors className="w-8 h-8 text-zinc-600 mx-auto" />
               <p className="text-xs text-zinc-400 max-w-xs mx-auto">
-                No problem sheet loaded. Click "Choose Sheet Image" above or take a screenshot of a tutorial question to crop it.
+                No problem sheet loaded. Click &quot;Choose Sheet Image&quot; above or take a screenshot of a tutorial question to crop it.
               </p>
             </div>
           )}
@@ -298,37 +438,26 @@ export default function ImportPage() {
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. Laurent series expansion of rational function"
+              placeholder="e.g. Eigenvalue computation & characteristic polynomial"
               className="w-full p-2 bg-zinc-950 border border-zinc-800 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-indigo-500"
             />
           </div>
 
           <div className="space-y-1">
             <label className="text-xs font-semibold text-zinc-400">Topic Section</label>
-            <select
+            <input
+              type="text"
+              list="topic-options"
               value={topic}
               onChange={(e) => setTopic(e.target.value)}
+              placeholder="Type or select a topic..."
               className="w-full p-2 bg-zinc-950 border border-zinc-800 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-indigo-500"
-            >
-              <option value="Revision exercises">Revision exercises</option>
-              <option value="Sets">Sets</option>
-              <option value="Functions">Functions</option>
-              <option value="Fractional linear transformations">Fractional linear transformations</option>
-              <option value="Estimating the size of functions">Estimating the size of functions</option>
-              <option value="Real and imaginary parts of functions">Real and imaginary parts of functions</option>
-              <option value="Graphical representation of complex functions">Graphical representation of complex functions</option>
-              <option value="Limits and continuity">Limits and continuity</option>
-              <option value="Differentiation">Differentiation</option>
-              <option value="Harmonic functions">Harmonic functions</option>
-              <option value="Power series">Power series</option>
-              <option value="Exponential and related functions">Exponential and related functions</option>
-              <option value="Contour integrals">Contour integrals</option>
-              <option value="Cauchy's integral formula">Cauchy's integral formula</option>
-              <option value="Taylor series, Laurent series, and residues">Taylor series, Laurent series, and residues</option>
-              <option value="Counting roots of equations">Counting roots of equations</option>
-              <option value="Fourier and Laplace transforms">Fourier and Laplace transforms</option>
-              <option value="Conformal mappings">Conformal mappings</option>
-            </select>
+            />
+            <datalist id="topic-options">
+              {availableTopics.map((t) => (
+                <option key={t} value={t} />
+              ))}
+            </datalist>
           </div>
 
           <div className="space-y-1">

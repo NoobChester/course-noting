@@ -9,7 +9,7 @@ export async function GET(
   try {
     const { id } = await params;
     const { searchParams } = new URL(req.url);
-    const courseId = searchParams.get("course") || "math2621";
+    const courseId = searchParams.get("course") || "sample1001";
     const question = await getQuestionById(id, courseId);
     if (!question) {
       return NextResponse.json({ error: "Question not found" }, { status: 404 });
@@ -27,7 +27,7 @@ export async function PUT(
   try {
     const { id } = await params;
     const { searchParams } = new URL(req.url);
-    const courseId = searchParams.get("course") || "math2621";
+    const courseId = searchParams.get("course") || "sample1001";
     const body: Question = await req.json();
 
     const existing = await getQuestionById(id, courseId);

@@ -20,9 +20,9 @@ SRC_STASH_API = os.path.join(BASE_DIR, "src", "api_studio")
 OUT_DIR = os.path.join(BASE_DIR, "out")
 
 def main():
-    print("=== Step 1: Bundling course packs ===")
+    print("=== Step 1: Bundling course packs (Demo Only for GitHub Pages) ===")
     bundle_script = os.path.join(BASE_DIR, "scripts", "bundle_packs.py")
-    subprocess.run([sys.executable, bundle_script], check=True)
+    subprocess.run([sys.executable, bundle_script, "--demo-only"], check=True)
 
     api_stashed = False
     try:

@@ -5,7 +5,7 @@ import { Question } from "@/lib/types";
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-    const courseId = searchParams.get("course") || "math2621";
+    const courseId = searchParams.get("course") || "sample1001";
     const questions = await getAllQuestions(courseId);
     return NextResponse.json(questions);
   } catch (err) {
@@ -16,7 +16,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-    const courseId = searchParams.get("course") || "math2621";
+    const courseId = searchParams.get("course") || "sample1001";
     const body: Question = await req.json();
     if (!body.id || !body.title) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });

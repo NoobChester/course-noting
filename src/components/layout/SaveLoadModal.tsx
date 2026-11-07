@@ -16,6 +16,7 @@ import {
   Bookmark,
   CheckCircle2
 } from "lucide-react";
+import { getActiveCourseId } from "@/lib/pack-loader";
 
 interface SaveLoadModalProps {
   isOpen: boolean;
@@ -49,16 +50,34 @@ export function SaveLoadModal({ isOpen, onClose }: SaveLoadModalProps) {
   useEffect(() => {
     if (isOpen) {
       setStatusMessage(null);
-      const activeCourse = localStorage.getItem("math_active_course") || "math2621";
+      const activeCourse = getActiveCourseId();
       fetch(`/api/userdata?activeCourse=${activeCourse}`)
-        .then((res) => res.json())
+        .then((res) => {
+          if (!res.ok) throw new Error("API not available");
+          return res.json();
+        })
         .then((data) => {
           if (data.success) {
             setSaveString(data.saveString || "");
             if (data.stats) setStats(data.stats);
           }
         })
-        .catch((err) => console.error("Error loading user data:", err));
+        .catch(() => {
+          // Client-side backup fallback for GitHub Pages
+          try {
+            const browserData: Record<string, any> = {};
+            for (let i = 0; i < localStorage.length; i++) {
+              const k = localStorage.key(i);
+              if (k && (k.startsWith("cn_") || k.startsWith("math_"))) {
+                browserData[k] = localStorage.getItem(k);
+              }
+            }
+            const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(browserData))));
+            setSaveString(encoded);
+          } catch (e) {
+            console.error("Local backup error:", e);
+          }
+        });
     }
   }, [isOpen]);
 
@@ -137,8 +156,8 @@ export function SaveLoadModal({ isOpen, onClose }: SaveLoadModalProps) {
         })
       });
 
+      if (!res.ok) throw new Error("API not available");
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to load backup");
 
       if (data.activeCourse) {
         localStorage.setItem("math_active_course", data.activeCourse);
@@ -152,8 +171,28 @@ export function SaveLoadModal({ isOpen, onClose }: SaveLoadModalProps) {
       setTimeout(() => {
         window.location.reload();
       }, 1500);
-    } catch (err: any) {
-      setStatusMessage({ type: "error", text: err.message || "Failed to restore state." });
+    } catch {
+      // Client-side fallback for GitHub Pages
+      try {
+        let jsonStr = inputString.trim();
+        if (!jsonStr.startsWith("{")) {
+          jsonStr = decodeURIComponent(escape(atob(jsonStr)));
+        }
+        const parsed = JSON.parse(jsonStr);
+        let count = 0;
+        Object.entries(parsed).forEach(([k, v]) => {
+          if (typeof v === "string") localStorage.setItem(k, v);
+          else localStorage.setItem(k, JSON.stringify(v));
+          count++;
+        });
+        setStatusMessage({
+          type: "success",
+          text: `Success! Restored ${count} data entries in browser storage. Reloading...`
+        });
+        setTimeout(() => window.location.reload(), 1200);
+      } catch (err: any) {
+        setStatusMessage({ type: "error", text: err.message || "Failed to restore state." });
+      }
     } finally {
       setLoading(false);
     }

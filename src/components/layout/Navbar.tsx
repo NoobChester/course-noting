@@ -227,8 +227,11 @@ export function Navbar() {
                 <Icon className="w-3.5 h-3.5" />
                 <span>{item.label}</span>
                 {isDimmed && (
-                  <span className="text-[9px] px-1 py-0.2 rounded bg-zinc-800 text-amber-400/90 font-mono border border-zinc-700/60">
-                    Local
+                  <span
+                    title="Local Studio Only: Ingesting local PDF files and saving to filesystem requires running locally (localhost:3000)"
+                    className="text-[9px] px-1.5 py-0.5 rounded bg-amber-950/70 text-amber-300 font-mono font-medium border border-amber-800/50"
+                  >
+                    Local Studio
                   </span>
                 )}
               </Link>

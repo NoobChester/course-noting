@@ -6,6 +6,7 @@ import { Question, QuestionMeta, SM2Rating } from "@/lib/types";
 import { MathRenderer } from "@/components/math/MathRenderer";
 import { ScratchpadCanvas } from "@/components/canvas/ScratchpadCanvas";
 import { calculateNextSM2, getIntervalPreview, isDueToday } from "@/lib/sm2-service";
+import { getActiveCourseId, loadActiveCourseData, isLocalStudio } from "@/lib/pack-loader";
 import confetti from "canvas-confetti";
 import {
   Flame,
@@ -26,7 +27,8 @@ import {
 } from "lucide-react";
 
 export default function DailyReviewPage() {
-  const [courseId, setCourseId] = useState<string>("math2621");
+  const [courseId, setCourseId] = useState<string>("sample1001");
+  const [fullQuestionsMap, setFullQuestionsMap] = useState<{ [id: string]: Question }>({});
   const [loading, setLoading] = useState(true);
   const [allQuestions, setAllQuestions] = useState<QuestionMeta[]>([]);
   const [dueQueue, setDueQueue] = useState<QuestionMeta[]>([]);
@@ -44,23 +46,42 @@ export default function DailyReviewPage() {
   const [mode, setMode] = useState<"due" | "all">("due");
 
   useEffect(() => {
-    const saved = localStorage.getItem("math_active_course") || "math2621";
+    const saved = getActiveCourseId();
     setCourseId(saved);
 
     fetch(`/api/questions?course=${saved}`)
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error("API not available");
+        return res.json();
+      })
       .then((questions: QuestionMeta[]) => {
         setAllQuestions(questions);
         const due = questions.filter((q) => isDueToday(q.sm2?.dueDate));
         setDueQueue(due);
         if (due.length === 0) {
-          // Fallback to "Needs Review" or "Unattempted" if no items strictly scheduled for today
           const needsReview = questions.filter((q) => q.status === "Needs Review" || q.status === "Unattempted");
           setDueQueue(needsReview.slice(0, 10));
           setMode("all");
         }
       })
-      .catch((err) => console.error(err))
+      .catch(async () => {
+        const merged = await loadActiveCourseData();
+        if (merged) {
+          setAllQuestions(merged.questions);
+          const map: { [id: string]: Question } = {};
+          merged.questions.forEach((q) => {
+            map[q.id] = q;
+          });
+          setFullQuestionsMap(map);
+          const due = merged.questions.filter((q) => isDueToday(q.sm2?.dueDate));
+          setDueQueue(due);
+          if (due.length === 0) {
+            const needsReview = merged.questions.filter((q) => q.status === "Needs Review" || q.status === "Unattempted");
+            setDueQueue(needsReview.slice(0, 10));
+            setMode("all");
+          }
+        }
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -75,15 +96,30 @@ export default function DailyReviewPage() {
     setLoadingQuestion(true);
     setShowOfficial(false);
 
+    if (fullQuestionsMap[qMeta.id]) {
+      setCurrentQuestion(fullQuestionsMap[qMeta.id]);
+      setWorkingText(fullQuestionsMap[qMeta.id].content.solution || "");
+      setLoadingQuestion(false);
+      return;
+    }
+
     fetch(`/api/questions/${qMeta.id}?course=${courseId}`)
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error("API not available");
+        return res.json();
+      })
       .then((q: Question) => {
         setCurrentQuestion(q);
         setWorkingText(q.content.solution || "");
       })
-      .catch((err) => console.error(err))
+      .catch(() => {
+        if (fullQuestionsMap[qMeta.id]) {
+          setCurrentQuestion(fullQuestionsMap[qMeta.id]);
+          setWorkingText(fullQuestionsMap[qMeta.id].content.solution || "");
+        }
+      })
       .finally(() => setLoadingQuestion(false));
-  }, [currentIndex, dueQueue, courseId]);
+  }, [currentIndex, dueQueue, courseId, fullQuestionsMap]);
 
   // Handle rating a question
   const handleRate = async (rating: SM2Rating) => {
@@ -105,15 +141,22 @@ export default function DailyReviewPage() {
       }
     };
 
-    // Save to server
-    try {
-      await fetch(`/api/questions/${currentQuestion.id}?course=${courseId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updated)
-      });
-    } catch (err) {
-      console.error(err);
+    // Save to server or localStorage
+    if (isLocalStudio()) {
+      try {
+        await fetch(`/api/questions/${currentQuestion.id}?course=${courseId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updated)
+        });
+      } catch (err) {
+        console.error(err);
+      }
+    } else {
+      try {
+        const storedKey = `cn_user_q_${courseId}_${currentQuestion.id}`;
+        localStorage.setItem(storedKey, JSON.stringify(updated));
+      } catch {}
     }
 
     setSessionCompletedCount((prev) => prev + 1);

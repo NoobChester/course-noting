@@ -4,7 +4,7 @@ import { getAllConcepts } from "@/lib/file-service";
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-    const courseId = searchParams.get("course") || "math2621";
+    const courseId = searchParams.get("course") || "sample1001";
     const concepts = await getAllConcepts(courseId);
     return NextResponse.json(concepts);
   } catch (err) {

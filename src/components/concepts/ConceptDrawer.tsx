@@ -5,6 +5,7 @@ import { Concept } from "@/lib/types";
 import { MathRenderer } from "../math/MathRenderer";
 import { X, BookOpen, ExternalLink, Sparkles } from "lucide-react";
 import Link from "next/link";
+import { getActiveCourseId, loadActiveCourseData } from "@/lib/pack-loader";
 
 interface ConceptDrawerProps {
   isOpen: boolean;
@@ -21,8 +22,12 @@ export function ConceptDrawer({ isOpen, onClose, conceptSlugs }: ConceptDrawerPr
     if (!isOpen || conceptSlugs.length === 0) return;
 
     setLoading(true);
-    fetch("/api/concepts")
-      .then((res) => res.json())
+    const courseId = getActiveCourseId();
+    fetch(`/api/concepts?course=${courseId}`)
+      .then((res) => {
+        if (!res.ok) throw new Error("API not available");
+        return res.json();
+      })
       .then((data: Concept[]) => {
         const filtered = data.filter((c) => conceptSlugs.includes(c.slug));
         setConcepts(filtered);
@@ -32,7 +37,18 @@ export function ConceptDrawer({ isOpen, onClose, conceptSlugs }: ConceptDrawerPr
           setActiveSlug(filtered[0].slug);
         }
       })
-      .catch((err) => console.error("Error loading concepts:", err))
+      .catch(async () => {
+        const merged = await loadActiveCourseData();
+        if (merged) {
+          const filtered = merged.concepts.filter((c) => conceptSlugs.includes(c.slug));
+          setConcepts(filtered);
+          if (filtered.length > 0 && !activeSlug) {
+            setActiveSlug(filtered[0].slug);
+          } else if (filtered.length > 0 && !filtered.some((c) => c.slug === activeSlug)) {
+            setActiveSlug(filtered[0].slug);
+          }
+        }
+      })
       .finally(() => setLoading(false));
   }, [isOpen, conceptSlugs, activeSlug]);
 
@@ -51,7 +67,7 @@ export function ConceptDrawer({ isOpen, onClose, conceptSlugs }: ConceptDrawerPr
             </div>
             <div>
               <h2 className="text-sm font-bold text-zinc-100">Needed Concepts Cheat Sheet</h2>
-              <p className="text-xs text-zinc-400">MATH2621 Higher Complex Analysis Theory</p>
+              <p className="text-xs text-zinc-400">Core Course Theory & Definitions</p>
             </div>
           </div>
           <button

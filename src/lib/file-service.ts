@@ -36,23 +36,46 @@ export async function getAllRegisteredCourses(): Promise<CourseMeta[]> {
 
     return courses.sort((a, b) => a.code.localeCompare(b.code));
   } catch (err) {
-    console.error("Error loading courses:", err);
+    console.error("Error loading courses from courses/ directory:", err);
+    // Check courses.example
+    try {
+      const exampleDir = path.join(process.cwd(), "courses.example");
+      const entries = await fs.readdir(exampleDir, { withFileTypes: true });
+      const courses: CourseMeta[] = [];
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const configPath = path.join(exampleDir, entry.name, "course.json");
+        try {
+          const configRaw = await fs.readFile(configPath, "utf-8");
+          courses.push(JSON.parse(configRaw));
+        } catch {
+          courses.push({
+            id: entry.name.toLowerCase(),
+            code: entry.name.toUpperCase(),
+            name: entry.name.toUpperCase(),
+            logoSymbol: "📚"
+          });
+        }
+      }
+      if (courses.length > 0) return courses;
+    } catch {}
+
     return [
       {
-        id: "math2621",
-        code: "MATH2621",
-        name: "Higher Complex Analysis",
-        institution: "The University of New South Wales",
-        term: "T3, 2026",
-        logoSymbol: "∫dz",
-        preset: "complex_analysis"
+        id: "sample1001",
+        code: "SAMPLE1001",
+        name: "Linear Algebra & Multivariable Calculus (Demo)",
+        institution: "Open Demo",
+        term: "Showcase",
+        logoSymbol: "λ",
+        preset: "general"
       }
     ];
   }
 }
 
 export async function resolveCourseFolder(courseId?: string): Promise<string> {
-  const targetId = (courseId || "math2621").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const targetId = (courseId || "sample1001").toLowerCase().replace(/[^a-z0-9]/g, "");
 
   try {
     const entries = await fs.readdir(COURSES_BASE_DIR);
@@ -63,8 +86,19 @@ export async function resolveCourseFolder(courseId?: string): Promise<string> {
     }
   } catch {}
 
+  // Check courses.example
+  try {
+    const exampleDir = path.join(process.cwd(), "courses.example");
+    const entries = await fs.readdir(exampleDir);
+    for (const entry of entries) {
+      if (entry.toLowerCase().replace(/[^a-z0-9]/g, "") === targetId) {
+        return path.join(exampleDir, entry);
+      }
+    }
+  } catch {}
+
   // Default fallback
-  return path.join(COURSES_BASE_DIR, "MATH2621");
+  return path.join(process.cwd(), "courses.example", "SAMPLE1001");
 }
 
 export async function resolveQuestionsDir(courseId?: string): Promise<string> {
@@ -124,7 +158,7 @@ ${content.official.trim()}
 
 export async function getAllQuestions(courseId?: string): Promise<QuestionMeta[]> {
   try {
-    const cleanCourseId = (courseId || "math2621").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const cleanCourseId = (courseId || "sample1001").toLowerCase().replace(/[^a-z0-9]/g, "");
     const dir = await resolveQuestionsDir(cleanCourseId);
     const files = await fs.readdir(dir);
     const questions: QuestionMeta[] = [];
@@ -170,7 +204,7 @@ export async function getAllQuestions(courseId?: string): Promise<QuestionMeta[]
 
 export async function getQuestionById(id: string, courseId?: string): Promise<Question | null> {
   try {
-    const cleanCourseId = (courseId || "math2621").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const cleanCourseId = (courseId || "sample1001").toLowerCase().replace(/[^a-z0-9]/g, "");
     const dir = await resolveQuestionsDir(cleanCourseId);
     const filePath = path.join(dir, `${id}.md`);
     const fileContent = await fs.readFile(filePath, "utf-8");
@@ -220,7 +254,7 @@ export async function getQuestionById(id: string, courseId?: string): Promise<Qu
 
 export async function saveQuestion(question: Question, courseId?: string): Promise<boolean> {
   try {
-    const cleanCourseId = (courseId || "math2621").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const cleanCourseId = (courseId || "sample1001").toLowerCase().replace(/[^a-z0-9]/g, "");
 
     // Dedicate user modifications to userdata/
     const success = await saveUserQuestionData(cleanCourseId, question.id, {

@@ -22,7 +22,7 @@ export async function POST(req: Request) {
   try {
     const {
       questionId,
-      courseId = "math2621",
+      courseId = "sample1001",
       studentSolution,
       apiKey,
       provider = "gemini",

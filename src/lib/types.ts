@@ -138,11 +138,13 @@ export type LectureInsightType = "intuition" | "exam_warning" | "nuance" | "heur
 export interface LectureInsight {
   id?: string;
   conceptSlug?: string;
+  questionId?: string;
   type: LectureInsightType;
   title: string;
   timestamp?: string; // e.g. "00:24:10"
   seconds?: number;
   content: string; // KaTeX markdown
+  text?: string; // Optional legacy alias for content
 }
 
 export interface QuestionHintInsight {

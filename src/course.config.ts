@@ -1,7 +1,7 @@
 import { MathSnippet } from "./lib/math-snippets";
 
 export interface CourseConfig {
-  code: string; // e.g. "MATH2621"
+  code: string; // e.g. "SAMPLE1001" or "MATH2621"
   name: string; // e.g. "Higher Complex Analysis"
   institution: string; // e.g. "The University of New South Wales"
   term: string; // e.g. "T3, 2026"

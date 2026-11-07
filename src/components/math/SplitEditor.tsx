@@ -90,7 +90,7 @@ export function SplitEditor({
     <div className="flex flex-col border border-zinc-800 rounded-xl overflow-hidden bg-zinc-950 shadow-xl">
       {/* View Mode Header & Math Toolbar */}
       <div className="flex items-center justify-between px-3 py-2 bg-zinc-900/90 border-b border-zinc-800 text-xs">
-        <span className="font-semibold text-zinc-400">MATH2621 Solution Editor</span>
+        <span className="font-semibold text-zinc-400">LaTeX Solution Editor</span>
         <div className="flex items-center gap-1 bg-zinc-800/80 p-0.5 rounded-lg border border-zinc-700/50">
           <button
             type="button"

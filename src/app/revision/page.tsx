@@ -1,13 +1,15 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { Question, Concept } from "@/lib/types";
+import { Question, Concept, CourseMeta } from "@/lib/types";
 import { MathRenderer } from "@/components/math/MathRenderer";
 import { Printer, Star, AlertCircle, BookOpen, Filter, Flame } from "lucide-react";
+import { getActiveCourseId, loadActiveCourseData } from "@/lib/pack-loader";
 
 export default function RevisionExporterPage() {
   const [concepts, setConcepts] = useState<Concept[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
+  const [courseMeta, setCourseMeta] = useState<CourseMeta | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Filters
@@ -17,9 +19,17 @@ export default function RevisionExporterPage() {
   const [includeTheorems, setIncludeTheorems] = useState(true);
 
   useEffect(() => {
+    const courseId = getActiveCourseId();
+
     Promise.all([
-      fetch("/api/concepts").then((res) => res.json()),
-      fetch("/api/questions").then((res) => res.json())
+      fetch(`/api/concepts?course=${courseId}`).then((res) => {
+        if (!res.ok) throw new Error("API not available");
+        return res.json();
+      }),
+      fetch(`/api/questions?course=${courseId}`).then((res) => {
+        if (!res.ok) throw new Error("API not available");
+        return res.json();
+      })
     ])
       .then(async ([cData, qMeta]) => {
         setConcepts(cData);
@@ -27,15 +37,21 @@ export default function RevisionExporterPage() {
         // Fetch full question content for revision export
         const fullQ: Question[] = [];
         for (const q of qMeta) {
-          // If already Needs Review or Starred or Difficult, load full body
           if (q.status === "Needs Review" || q.starred || q.isDifficult) {
-            const res = await fetch(`/api/questions/${q.id}`);
+            const res = await fetch(`/api/questions/${q.id}?course=${courseId}`);
             if (res.ok) fullQ.push(await res.json());
           }
         }
         setQuestions(fullQ);
       })
-      .catch((err) => console.error(err))
+      .catch(async () => {
+        const merged = await loadActiveCourseData();
+        if (merged) {
+          setCourseMeta(merged.course);
+          setConcepts(merged.concepts);
+          setQuestions(merged.questions);
+        }
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -50,6 +66,8 @@ export default function RevisionExporterPage() {
     return true;
   });
 
+  const courseCode = courseMeta?.code || "Course";
+
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
       {/* Control Bar (Hidden on print) */}
@@ -58,25 +76,29 @@ export default function RevisionExporterPage() {
           <div>
             <h1 className="text-2xl font-black text-white tracking-tight flex items-center gap-2">
               <Printer className="w-5 h-5 text-indigo-400" />
-              <span>Exam Revision & Printable Cheat Sheet</span>
+              <span>{courseCode} Printable Revision Sheet</span>
             </h1>
             <p className="text-xs text-zinc-400 mt-1">
-              Export a clean, high-density study compendium. Click Print to save directly as a PDF!
+              Export formulas, core definitions, and flagged practice questions to clean PDF or A4 printout.
             </p>
           </div>
 
           <button
             type="button"
             onClick={handlePrint}
-            className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition flex items-center gap-2 shadow-lg shadow-indigo-600/30 cursor-pointer self-start sm:self-auto"
+            className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-lg shadow-indigo-600/30 transition flex items-center justify-center gap-2 cursor-pointer"
           >
             <Printer className="w-4 h-4" />
-            <span>Print / Save as PDF (Ctrl+P)</span>
+            <span>Print / Save as PDF</span>
           </button>
         </div>
 
         {/* Filter Checkboxes */}
-        <div className="flex items-center gap-4 flex-wrap pt-2 border-t border-zinc-800 text-xs">
+        <div className="flex flex-wrap items-center gap-4 pt-3 border-t border-zinc-800 text-xs">
+          <span className="text-zinc-500 font-semibold flex items-center gap-1">
+            <Filter className="w-3.5 h-3.5" /> Filter Content:
+          </span>
+
           <label className="flex items-center gap-1.5 cursor-pointer text-zinc-300">
             <input
               type="checkbox"
@@ -84,7 +106,7 @@ export default function RevisionExporterPage() {
               onChange={(e) => setIncludeTheorems(e.target.checked)}
               className="rounded bg-zinc-800 text-indigo-600 border-zinc-700"
             />
-            <span className="font-semibold">Include Core Theorems</span>
+            <span>Include Core Theorems / Concepts</span>
           </label>
 
           <label className="flex items-center gap-1.5 cursor-pointer text-zinc-300">
@@ -94,7 +116,7 @@ export default function RevisionExporterPage() {
               onChange={(e) => setOnlyNeedsReview(e.target.checked)}
               className="rounded bg-zinc-800 text-indigo-600 border-zinc-700"
             />
-            <span className="font-semibold text-amber-400">Needs Review Only</span>
+            <span className="text-amber-400 font-semibold">Needs Review Only</span>
           </label>
 
           <label className="flex items-center gap-1.5 cursor-pointer text-zinc-300">
@@ -104,7 +126,7 @@ export default function RevisionExporterPage() {
               onChange={(e) => setOnlyDifficult(e.target.checked)}
               className="rounded bg-zinc-800 text-indigo-600 border-zinc-700"
             />
-            <span className="font-semibold text-orange-400">Difficult (*) Only</span>
+            <span>Hard Problems Only (*)</span>
           </label>
 
           <label className="flex items-center gap-1.5 cursor-pointer text-zinc-300">
@@ -121,19 +143,21 @@ export default function RevisionExporterPage() {
 
       {loading ? (
         <div className="py-20 text-center text-zinc-500 text-sm animate-pulse">
-          Generating printable revision sheet...
+          Generating {courseCode} printable revision sheet...
         </div>
       ) : (
         <div className="space-y-10 print:space-y-6">
           {/* Section 1: Core Theorems Summary */}
-          {includeTheorems && (
+          {includeTheorems && concepts.length > 0 && (
             <div className="space-y-4">
               <div className="border-b-2 border-indigo-500/60 pb-2 flex items-center justify-between">
                 <h2 className="text-xl font-bold text-zinc-100 flex items-center gap-2 print:text-black">
                   <BookOpen className="w-5 h-5 text-indigo-400" />
-                  <span>MATH2621 Essential Formulas & Theorems</span>
+                  <span>{courseCode} Essential Formulas & Theorems</span>
                 </h2>
-                <span className="text-xs text-zinc-400 font-mono print:text-gray-600">UNSW Higher Complex Analysis</span>
+                <span className="text-xs text-zinc-400 font-mono print:text-gray-600">
+                  {courseMeta ? `${courseMeta.name}${courseMeta.institution ? ` • ${courseMeta.institution}` : ""}` : "Essential Formula Summary"}
+                </span>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 print:grid-cols-2">

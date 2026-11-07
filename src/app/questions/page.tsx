@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useMemo, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { QuestionMeta, QuestionStatus } from "@/lib/types";
+import { QuestionMeta, QuestionStatus, CourseMeta } from "@/lib/types";
 import {
   Search,
   Filter,
@@ -16,9 +16,11 @@ import {
   HelpCircle,
   Flame,
   FileText,
-  Calendar
+  Calendar,
+  GraduationCap
 } from "lucide-react";
 import { isDueToday } from "@/lib/sm2-service";
+import { getActiveCourseId, loadActiveCourseData } from "@/lib/pack-loader";
 
 function QuestionBankContent() {
   const searchParams = useSearchParams();
@@ -26,6 +28,7 @@ function QuestionBankContent() {
   const initialStatus = searchParams.get("status") || "";
 
   const [questions, setQuestions] = useState<QuestionMeta[]>([]);
+  const [courseMeta, setCourseMeta] = useState<CourseMeta | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Filters
@@ -39,11 +42,20 @@ function QuestionBankContent() {
   const [onlyDue, setOnlyDue] = useState(false);
 
   useEffect(() => {
-    const courseId = localStorage.getItem("math_active_course") || "math2621";
+    const courseId = getActiveCourseId();
     fetch(`/api/questions?course=${courseId}`, { cache: "no-store" })
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error("API not available");
+        return res.json();
+      })
       .then((data: QuestionMeta[]) => setQuestions(data))
-      .catch((err) => console.error("Error fetching questions:", err))
+      .catch(async () => {
+        const merged = await loadActiveCourseData();
+        if (merged) {
+          setQuestions(merged.questions);
+          setCourseMeta(merged.course);
+        }
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -106,7 +118,7 @@ function QuestionBankContent() {
     );
 
     try {
-      const courseId = localStorage.getItem("math_active_course") || "math2621";
+      const courseId = getActiveCourseId();
       await fetch(`/api/questions/${q.id}?course=${courseId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -162,21 +174,19 @@ function QuestionBankContent() {
             </span>
           </h1>
           <p className="text-xs sm:text-sm text-zinc-400 mt-1">
-            Browse, search, and solve problems from UNSW MATH2621 Weeks 1–10.
+            Browse, search, and solve problems from {courseMeta ? `${courseMeta.code}: ${courseMeta.name}` : "your active course"}.
           </p>
         </div>
 
         <div className="flex items-center gap-2">
-          <a
-            href="/courses/MATH2621/MATH2621_Problems_2026-10-06-1.pdf"
-            target="_blank"
-            rel="noopener noreferrer"
+          <Link
+            href="/courses"
             className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold flex items-center gap-1.5 transition border border-zinc-700"
-            title="Open Master Problem Sheet (PDF)"
+            title="Switch Active Course"
           >
-            <FileText className="w-4 h-4 text-indigo-400" />
-            <span>Master PDF</span>
-          </a>
+            <GraduationCap className="w-4 h-4 text-indigo-400" />
+            <span>{courseMeta ? courseMeta.code : "Switch Course"}</span>
+          </Link>
           <Link
             href="/exam"
             className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold flex items-center gap-1.5 transition border border-zinc-700"
