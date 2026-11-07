@@ -18,11 +18,24 @@ export const PRESET_CLASSMATE = "classmate";
 export const PRESET_BLANK = "blank";
 export const PRESET_FULL = "full";
 
+/**
+ * Helper to check whether an item's week matches the selected weeks
+ * @param itemWeek - week number on the item (undefined, 0, or positive integer)
+ * @param selectedWeeks - "all" or an array of numbers (where 0 represents General / Unassigned)
+ */
+export function isWeekIncluded(itemWeek: number | undefined, selectedWeeks: "all" | number[]): boolean {
+  if (selectedWeeks === "all") return true;
+  if (!Array.isArray(selectedWeeks) || selectedWeeks.length === 0) return false;
+
+  const normalizedWeek = (!itemWeek || isNaN(itemWeek) || itemWeek <= 0) ? 0 : itemWeek;
+  return selectedWeeks.includes(normalizedWeek);
+}
+
 export function getPresetOptions(preset: string, courseId: string): SelectiveExportOptions {
   if (preset === PRESET_BLANK) {
     return {
       courseId,
-      weekRange: "all",
+      selectedWeeks: "all",
       includeQuestions: true,
       includeConcepts: true,
       includeLectureNotes: true,
@@ -40,7 +53,7 @@ export function getPresetOptions(preset: string, courseId: string): SelectiveExp
   if (preset === PRESET_FULL) {
     return {
       courseId,
-      weekRange: "all",
+      selectedWeeks: "all",
       includeQuestions: true,
       includeConcepts: true,
       includeLectureNotes: true,
@@ -58,7 +71,7 @@ export function getPresetOptions(preset: string, courseId: string): SelectiveExp
   // Default: Share with Classmates
   return {
     courseId,
-    weekRange: "all",
+    selectedWeeks: "all",
     includeQuestions: true,
     includeConcepts: true,
     includeLectureNotes: true,
@@ -92,7 +105,7 @@ export function buildSelectiveExport(
   let filteredConcepts: Concept[] = [];
   if (options.includeConcepts) {
     filteredConcepts = (rawData.concepts || []).filter((c) => {
-      if (options.weekRange !== "all" && c.week !== options.weekRange) return false;
+      if (!isWeekIncluded(c.week, options.selectedWeeks)) return false;
       return true;
     });
   }
@@ -103,7 +116,7 @@ export function buildSelectiveExport(
   if (options.includeLectureNotes || options.includeSpokenIntuitions || options.includeExamWarnings) {
     filteredLectures = (rawData.lectures || [])
       .filter((l) => {
-        if (options.weekRange !== "all" && l.week !== options.weekRange) return false;
+        if (!isWeekIncluded(l.week, options.selectedWeeks)) return false;
         return true;
       })
       .map((lec) => {
@@ -132,7 +145,7 @@ export function buildSelectiveExport(
   if (options.includeQuestions) {
     filteredQuestions = (rawData.questions || [])
       .filter((q) => {
-        if (options.weekRange !== "all" && q.week !== options.weekRange) return false;
+        if (!isWeekIncluded(q.week, options.selectedWeeks)) return false;
         return true;
       })
       .map((q) => {

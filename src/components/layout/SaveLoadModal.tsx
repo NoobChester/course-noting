@@ -27,7 +27,8 @@ import {
   Shield,
   Eye,
   CheckSquare,
-  Square
+  Square,
+  Plus
 } from "lucide-react";
 import { getActiveCourseId, loadActiveCourseData } from "@/lib/pack-loader";
 import { MergedCourseData, SelectiveExportOptions, ExportFormat, ExportedPackSummary } from "@/lib/types";
@@ -79,10 +80,16 @@ export function SaveLoadModal({ isOpen, onClose }: SaveLoadModalProps) {
     getPresetOptions(PRESET_CLASSMATE, "sample1001")
   );
 
+  // Dynamic Weeks Detection & Drag-Range Selection
+  const [extraWeeks, setExtraWeeks] = useState(0);
+  const [isDraggingWeek, setIsDraggingWeek] = useState(false);
+  const [dragMode, setDragMode] = useState<"select" | "deselect">("select");
+
   // Fetch export string, course data, and stats whenever modal opens
   useEffect(() => {
     if (isOpen) {
       setStatusMessage(null);
+      setExtraWeeks(0);
       const courseId = getActiveCourseId();
       setActiveCourseId(courseId);
       setSelectiveOptions(getPresetOptions(PRESET_CLASSMATE, courseId));
@@ -121,6 +128,13 @@ export function SaveLoadModal({ isOpen, onClose }: SaveLoadModalProps) {
     }
   }, [isOpen]);
 
+  // Window mouseup listener to end drag selection
+  useEffect(() => {
+    const handleMouseUp = () => setIsDraggingWeek(false);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => window.removeEventListener("mouseup", handleMouseUp);
+  }, []);
+
   // Close on ESC
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -129,6 +143,137 @@ export function SaveLoadModal({ isOpen, onClose }: SaveLoadModalProps) {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, onClose]);
+
+  // Detect available weeks and item counts dynamically from active course data
+  const detectedWeeksInfo = useMemo(() => {
+    let max = 0;
+    let hasGeneral = false;
+    const weekCountMap: Record<number, number> = {};
+
+    if (mergedData) {
+      const allItems = [
+        ...(mergedData.questions || []),
+        ...(mergedData.concepts || []),
+        ...(mergedData.lectures || [])
+      ];
+
+      for (const item of allItems) {
+        const w = (item as any).week;
+        if (w === undefined || w === null || isNaN(w) || w <= 0) {
+          hasGeneral = true;
+          weekCountMap[0] = (weekCountMap[0] || 0) + 1;
+        } else {
+          if (w > max) max = w;
+          weekCountMap[w] = (weekCountMap[w] || 0) + 1;
+        }
+      }
+    }
+
+    const baseMax = Math.max(max, 10);
+    return {
+      maxWeek: baseMax,
+      hasGeneral,
+      weekCountMap
+    };
+  }, [mergedData]);
+
+  const totalDisplayWeeks = detectedWeeksInfo.maxWeek + extraWeeks;
+  const weekList = useMemo(() => {
+    return Array.from({ length: totalDisplayWeeks }, (_, i) => i + 1);
+  }, [totalDisplayWeeks]);
+
+  const allAvailableWeeks = useMemo(() => {
+    return [ ...(detectedWeeksInfo.hasGeneral ? [0] : []), ...weekList ];
+  }, [detectedWeeksInfo.hasGeneral, weekList]);
+
+  const isWeekSelected = (w: number) => {
+    if (selectiveOptions.selectedWeeks === "all") return true;
+    return selectiveOptions.selectedWeeks.includes(w);
+  };
+
+  const handleSelectAllWeeks = () => {
+    setSelectedPreset("custom");
+    setSelectiveOptions((prev) => ({
+      ...prev,
+      selectedWeeks: "all"
+    }));
+  };
+
+  const handleClearWeeks = () => {
+    setSelectedPreset("custom");
+    setSelectiveOptions((prev) => ({
+      ...prev,
+      selectedWeeks: []
+    }));
+  };
+
+  const handleWeekMouseDown = (w: number) => {
+    setIsDraggingWeek(true);
+    setSelectedPreset("custom");
+    const currentlySelected = isWeekSelected(w);
+    const mode = currentlySelected ? "deselect" : "select";
+    setDragMode(mode);
+
+    if (mode === "select") {
+      if (selectiveOptions.selectedWeeks === "all") return;
+      const current = Array.isArray(selectiveOptions.selectedWeeks) ? selectiveOptions.selectedWeeks : [];
+      if (!current.includes(w)) {
+        const next = [...current, w].sort((a, b) => a - b);
+        if (allAvailableWeeks.every((x) => next.includes(x))) {
+          setSelectiveOptions((prev) => ({ ...prev, selectedWeeks: "all" }));
+        } else {
+          setSelectiveOptions((prev) => ({ ...prev, selectedWeeks: next }));
+        }
+      }
+    } else {
+      if (selectiveOptions.selectedWeeks === "all") {
+        setSelectiveOptions((prev) => ({
+          ...prev,
+          selectedWeeks: allAvailableWeeks.filter((x: number) => x !== w)
+        }));
+      } else {
+        const cur = Array.isArray(selectiveOptions.selectedWeeks) ? selectiveOptions.selectedWeeks : allAvailableWeeks;
+        setSelectiveOptions((prev) => ({
+          ...prev,
+          selectedWeeks: cur.filter((x: number) => x !== w)
+        }));
+      }
+    }
+  };
+
+  const handleWeekMouseEnter = (w: number) => {
+    if (!isDraggingWeek) return;
+    setSelectedPreset("custom");
+
+    if (dragMode === "select") {
+      if (selectiveOptions.selectedWeeks === "all") return;
+      const current = Array.isArray(selectiveOptions.selectedWeeks) ? selectiveOptions.selectedWeeks : [];
+      if (!current.includes(w)) {
+        const next = [...current, w].sort((a, b) => a - b);
+        if (allAvailableWeeks.every((x) => next.includes(x))) {
+          setSelectiveOptions((prev) => ({ ...prev, selectedWeeks: "all" }));
+        } else {
+          setSelectiveOptions((prev) => ({ ...prev, selectedWeeks: next }));
+        }
+      }
+    } else {
+      if (selectiveOptions.selectedWeeks === "all") {
+        setSelectiveOptions((prev) => ({
+          ...prev,
+          selectedWeeks: allAvailableWeeks.filter((x: number) => x !== w)
+        }));
+      } else {
+        const cur = Array.isArray(selectiveOptions.selectedWeeks) ? selectiveOptions.selectedWeeks : allAvailableWeeks;
+        setSelectiveOptions((prev) => ({
+          ...prev,
+          selectedWeeks: cur.filter((x: number) => x !== w)
+        }));
+      }
+    }
+  };
+
+  const isZeroWeeksSelected =
+    Array.isArray(selectiveOptions.selectedWeeks) && selectiveOptions.selectedWeeks.length === 0;
 
   // Compute live selective export package
   const exportBundle = useMemo(() => {
@@ -157,7 +302,7 @@ export function SaveLoadModal({ isOpen, onClose }: SaveLoadModalProps) {
   };
 
   const handleDownloadSelective = () => {
-    if (!exportBundle) return;
+    if (!exportBundle || isZeroWeeksSelected) return;
     const date = new Date().toISOString().slice(0, 10);
     const code = mergedData?.course.code.toLowerCase() || activeCourseId;
 
@@ -486,29 +631,131 @@ export function SaveLoadModal({ isOpen, onClose }: SaveLoadModalProps) {
                 </div>
               </div>
 
-              {/* Scope & Week Filter */}
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3.5 rounded-xl bg-zinc-900/60 border border-zinc-800 text-xs">
-                <span className="font-bold text-zinc-300 flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-violet-400" />
-                  <span>Target Week Scope:</span>
-                </span>
-                <select
-                  value={selectiveOptions.weekRange}
-                  onChange={(e) =>
-                    setSelectiveOptions({
-                      ...selectiveOptions,
-                      weekRange: e.target.value === "all" ? "all" : Number(e.target.value)
-                    })
-                  }
-                  className="bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-xs text-zinc-200 focus:outline-none focus:border-indigo-500 w-full sm:w-auto"
-                >
-                  <option value="all">All Weeks (Comprehensive)</option>
-                  {Array.from({ length: 10 }).map((_, i) => (
-                    <option key={i + 1} value={i + 1}>
-                      Week {i + 1} Only
-                    </option>
-                  ))}
-                </select>
+              {/* Scope & Week Filter (Dynamic & University-Agnostic with Drag-Range) */}
+              <div className="p-4 rounded-xl bg-zinc-900/60 border border-zinc-800 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <span className="font-bold text-xs text-zinc-200 flex items-center gap-1.5">
+                      <Clock className="w-4 h-4 text-violet-400" />
+                      <span>Target Week Scope</span>
+                      <span className="text-[11px] font-normal text-zinc-400">
+                        {selectiveOptions.selectedWeeks === "all"
+                          ? "(All Weeks Included)"
+                          : isZeroWeeksSelected
+                          ? "(0 Weeks Selected)"
+                          : `(${selectiveOptions.selectedWeeks.length} Weeks Selected)`}
+                      </span>
+                    </span>
+                    <p className="text-[11px] text-zinc-400 mt-0.5">
+                      Click to toggle, or click and drag across pills to sweep-select a range.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 self-start sm:self-auto">
+                    <button
+                      type="button"
+                      onClick={handleSelectAllWeeks}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition border ${
+                        selectiveOptions.selectedWeeks === "all"
+                          ? "bg-indigo-600/30 text-indigo-300 border-indigo-500/50"
+                          : "bg-zinc-800 text-zinc-300 border-zinc-700 hover:bg-zinc-700 hover:text-white"
+                      }`}
+                    >
+                      Select All
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleClearWeeks}
+                      className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-zinc-800 text-zinc-400 hover:text-zinc-200 border border-zinc-700 hover:bg-zinc-700 transition"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+
+                {/* Week Pills Grid */}
+                <div className="flex flex-wrap items-center gap-1.5 select-none pt-1">
+                  {/* General / Unassigned Pill */}
+                  {(detectedWeeksInfo.hasGeneral || (detectedWeeksInfo.weekCountMap[0] || 0) > 0) && (
+                    <button
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        handleWeekMouseDown(0);
+                      }}
+                      onMouseEnter={() => handleWeekMouseEnter(0)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition border flex items-center gap-1.5 cursor-pointer ${
+                        isWeekSelected(0)
+                          ? "bg-indigo-600 text-white border-indigo-500 shadow-sm shadow-indigo-600/30 font-bold"
+                          : "bg-zinc-950 text-zinc-400 border-zinc-800 hover:border-zinc-700 hover:text-zinc-200"
+                      }`}
+                    >
+                      <span>General / Unassigned</span>
+                      {detectedWeeksInfo.weekCountMap[0] !== undefined && (
+                        <span
+                          className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                            isWeekSelected(0) ? "bg-indigo-700/80 text-white" : "bg-zinc-800 text-zinc-400"
+                          }`}
+                        >
+                          {detectedWeeksInfo.weekCountMap[0]}
+                        </span>
+                      )}
+                    </button>
+                  )}
+
+                  {/* Dynamic Week Pills 1..N */}
+                  {weekList.map((w) => {
+                    const selected = isWeekSelected(w);
+                    const count = detectedWeeksInfo.weekCountMap[w];
+
+                    return (
+                      <button
+                        key={w}
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          handleWeekMouseDown(w);
+                        }}
+                        onMouseEnter={() => handleWeekMouseEnter(w)}
+                        className={`px-3 py-1.5 rounded-lg text-xs transition border flex items-center gap-1 cursor-pointer font-medium ${
+                          selected
+                            ? "bg-indigo-600 text-white border-indigo-400 shadow-sm shadow-indigo-600/30 font-bold"
+                            : "bg-zinc-950 text-zinc-400 border-zinc-800 hover:border-zinc-700 hover:text-zinc-200"
+                        }`}
+                      >
+                        <span>W{w}</span>
+                        {count !== undefined && count > 0 && (
+                          <span
+                            className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                              selected ? "bg-indigo-700/80 text-indigo-100" : "bg-zinc-800/90 text-zinc-500"
+                            }`}
+                          >
+                            {count}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+
+                  {/* Add Week Extender Button */}
+                  <button
+                    type="button"
+                    onClick={() => setExtraWeeks((prev) => prev + 1)}
+                    className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-zinc-400 hover:text-indigo-300 border border-dashed border-zinc-700 hover:border-indigo-500/60 bg-zinc-950/50 hover:bg-indigo-950/30 transition flex items-center gap-1 cursor-pointer"
+                    title="Add another week to the range (e.g. for 12, 14, or 16-week semesters)"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add Week</span>
+                  </button>
+                </div>
+
+                {/* Zero Weeks Selected Alert */}
+                {isZeroWeeksSelected && (
+                  <div className="p-3 rounded-xl bg-amber-950/50 border border-amber-600/40 text-amber-300 text-xs flex items-center gap-2 animate-in fade-in">
+                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>0 weeks selected — please select at least one week pill or click &quot;Select All&quot; to export questions/lectures.</span>
+                  </div>
+                )}
               </div>
 
               {/* Granular Checkboxes Grid */}
@@ -729,8 +976,8 @@ export function SaveLoadModal({ isOpen, onClose }: SaveLoadModalProps) {
                 <button
                   type="button"
                   onClick={handleDownloadSelective}
-                  disabled={!exportBundle}
-                  className="w-full py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold text-xs shadow-lg shadow-indigo-600/30 transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 mt-2"
+                  disabled={!exportBundle || isZeroWeeksSelected}
+                  className="w-full py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold text-xs shadow-lg shadow-indigo-600/30 transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed mt-2"
                 >
                   {exportFormat === "json" ? (
                     <>

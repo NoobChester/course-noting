@@ -211,7 +211,7 @@ export interface MergedCourseData {
 
 export interface SelectiveExportOptions {
   courseId: string;
-  weekRange: "all" | number;
+  selectedWeeks: "all" | number[]; // Array of selected week numbers. 0 represents General / Unassigned. "all" represents all weeks.
 
   // Curriculum
   includeQuestions: boolean;
