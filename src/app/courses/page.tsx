@@ -23,7 +23,8 @@ import {
   saveCustomCourse,
   setActiveCourseId as setStoredActiveCourseId,
   getActiveCourseId,
-  importCustomPack
+  importCustomPack,
+  getBasePath
 } from "@/lib/pack-loader";
 
 export default function CoursesPage() {
@@ -69,7 +70,7 @@ export default function CoursesPage() {
   const selectActiveCourse = (courseId: string) => {
     setStoredActiveCourseId(courseId);
     setActiveCourseId(courseId);
-    window.location.href = "/";
+    window.location.href = `${getBasePath()}/`;
   };
 
   const handleCreateCourse = async (e: React.FormEvent) => {
@@ -164,7 +165,7 @@ export default function CoursesPage() {
     setShowWizard(false);
     setSuccessBanner(`Course ${newCourse.code} created successfully and activated!`);
     setTimeout(() => {
-      window.location.href = "/";
+      window.location.href = `${getBasePath()}/`;
     }, 1500);
   };
 

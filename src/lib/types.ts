@@ -205,5 +205,50 @@ export interface MergedCourseData {
   layer2Active: boolean;
 }
 
+// -------------------------------------------------------------
+// Selective Export & Classmate Sharing Schemas
+// -------------------------------------------------------------
+
+export interface SelectiveExportOptions {
+  courseId: string;
+  weekRange: "all" | number;
+
+  // Curriculum
+  includeQuestions: boolean;
+  includeConcepts: boolean;
+
+  // Lecture Layer
+  includeLectureNotes: boolean;
+  includeSpokenIntuitions: boolean;
+  includeExamWarnings: boolean;
+
+  // Student Work
+  includeWrittenSolutions: boolean;
+  includeCanvasScratchpads: boolean;
+
+  // Private Study Metrics
+  includeSm2Stats: boolean;
+  includeMasteryStatus: boolean;
+  includeStarredFlags: boolean;
+  includeAiReviewHistory: boolean;
+}
+
+export type ExportFormat = "json" | "markdown" | "string";
+
+export interface ExportedPackSummary {
+  courseCode: string;
+  courseName: string;
+  totalCourses: number;
+  questionCount: number;
+  conceptCount: number;
+  lectureCount: number;
+  insightCount: number;
+  writtenSolutionCount: number;
+  hasCanvasDrawings: boolean;
+  hasPrivateMetrics: boolean;
+  exportedAt?: string;
+  formatType: "pack_json" | "save_string" | "markdown" | "unknown";
+}
+
 
 

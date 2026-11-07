@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 import { QuestionMeta, CourseMeta } from "@/lib/types";
 import { isDueToday } from "@/lib/sm2-service";
-import { isLayer2Enabled, setLayer2Enabled, isLocalStudio, getCourseCatalog, getBasePath } from "@/lib/pack-loader";
+import { isLayer2Enabled, setLayer2Enabled, isLocalStudio, getCourseCatalog, getBasePath, fetchBasePack } from "@/lib/pack-loader";
 import { SaveLoadModal } from "./SaveLoadModal";
 import { SettingsModal } from "./SettingsModal";
 
@@ -95,20 +95,18 @@ export function Navbar() {
         const dueToday = data.filter((q) => isDueToday(q.sm2?.dueDate)).length;
         setStats({ total, mastered, review, dueToday });
       })
-      .catch(() => {
-        // Fallback to static base pack
-        fetch(`${getBasePath()}/data/${savedCourseId}_base.json`)
-          .then((r) => r.json())
-          .then((base) => {
-            const qs = base.questions || [];
-            setStats({
-              total: qs.length,
-              mastered: qs.filter((q: any) => q.status === "Mastered").length,
-              review: qs.filter((q: any) => q.status === "Needs Review").length,
-              dueToday: 0
-            });
-          })
-          .catch(() => {});
+      .catch(async () => {
+        // Fallback to base pack (loads from localStorage for custom courses or static JSON for pre-bundled)
+        const base = await fetchBasePack(savedCourseId);
+        if (base) {
+          const qs = base.questions || [];
+          setStats({
+            total: qs.length,
+            mastered: qs.filter((q: any) => q.status === "Mastered").length,
+            review: qs.filter((q: any) => q.status === "Needs Review").length,
+            dueToday: qs.filter((q: any) => isDueToday(q.sm2?.dueDate)).length
+          });
+        }
       });
   }, [pathname, activeCourse]);
 
