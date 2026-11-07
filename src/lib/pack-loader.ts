@@ -42,10 +42,19 @@ export function isLocalStudio(): boolean {
   return host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0";
 }
 
+/** Get basePath for GitHub Pages hosting (e.g. /course-noting) */
+export function getBasePath(): string {
+  if (typeof window === "undefined") return "";
+  if (window.location.pathname.startsWith("/course-noting")) {
+    return "/course-noting";
+  }
+  return "";
+}
+
 /** Fetch the pre-bundled course catalog */
 export async function getCourseCatalog(): Promise<CourseCatalogItem[]> {
   try {
-    const res = await fetch("/data/catalog.json", { cache: "no-cache" });
+    const res = await fetch(`${getBasePath()}/data/catalog.json`, { cache: "no-cache" });
     if (!res.ok) throw new Error("Catalog fetch failed");
     return await res.json();
   } catch (err) {
@@ -112,7 +121,7 @@ export async function fetchBasePack(courseId: string): Promise<CourseBasePack | 
 
   // 2. Fetch from static public/data/<cleanId>_base.json
   try {
-    const res = await fetch(`/data/${cleanId}_base.json`, { cache: "no-cache" });
+    const res = await fetch(`${getBasePath()}/data/${cleanId}_base.json`, { cache: "no-cache" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch (err) {
@@ -139,7 +148,7 @@ export async function fetchLecturePack(courseId: string): Promise<CourseLectureP
 
   // 2. Fetch from static public/data/<cleanId>_lectures.json
   try {
-    const res = await fetch(`/data/${cleanId}_lectures.json`, { cache: "no-cache" });
+    const res = await fetch(`${getBasePath()}/data/${cleanId}_lectures.json`, { cache: "no-cache" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch (err) {
