@@ -190,10 +190,10 @@ export function SaveLoadModal({ isOpen, onClose }: SaveLoadModalProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/75 backdrop-blur-sm animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/75 backdrop-blur-sm animate-in fade-in duration-200 overflow-y-auto">
       <div className="w-full max-w-2xl rounded-2xl bg-zinc-950 border border-zinc-800 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         {/* Header */}
-        <div className="px-6 py-4 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/50">
+        <div className="px-6 py-4 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/50 shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center font-bold">
               <ShieldCheck className="w-5 h-5" />
@@ -219,7 +219,7 @@ export function SaveLoadModal({ isOpen, onClose }: SaveLoadModalProps) {
         </div>
 
         {/* Navigation Tabs */}
-        <div className="flex border-b border-zinc-800 bg-zinc-900/30 px-6 pt-2">
+        <div className="flex border-b border-zinc-800 bg-zinc-900/30 px-6 pt-2 shrink-0">
           <button
             onClick={() => setActiveTab("save")}
             className={`flex items-center gap-2 pb-3 px-3 text-xs font-bold transition border-b-2 cursor-pointer ${

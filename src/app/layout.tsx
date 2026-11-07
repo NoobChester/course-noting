@@ -4,8 +4,8 @@ import "./globals.css";
 import { Navbar } from "@/components/layout/Navbar";
 
 export const metadata: Metadata = {
-  title: "MATH2621 Study Hub — Higher Complex Analysis",
-  description: "Interactive problem solver, concept library, timed mock exams, and revision cheat sheets for MATH2621.",
+  title: "Course Noting — Blank Slate Study Hub",
+  description: "Interactive problem solver, concept library, lecture insights overlay, and revision cheat sheets.",
 };
 
 export default function RootLayout({
