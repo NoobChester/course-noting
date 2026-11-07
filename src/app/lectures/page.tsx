@@ -30,7 +30,9 @@ import {
   Headphones,
   CheckCircle2,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Download,
+  FileDown
 } from "lucide-react";
 import {
   isLocalStudio,
@@ -239,6 +241,59 @@ export default function LecturesPage() {
     }
   };
 
+  const exportLectureMarkdown = (lecture: LectureNote) => {
+    let md = `# ${lecture.title}\n\n`;
+    md += `**Course:** ${courseId.toUpperCase()}\n`;
+    md += `**Week:** ${lecture.week}\n`;
+    if (lecture.date) md += `**Date:** ${lecture.date}\n`;
+    if (lecture.echo360Url) md += `**Echo360:** ${lecture.echo360Url}\n`;
+    md += `\n---\n\n`;
+
+    if (lecture.insights && lecture.insights.length > 0) {
+      md += `## 💡 Extracted Spoken Intuitions & Exam Warnings\n\n`;
+      lecture.insights.forEach((ins) => {
+        const icon = ins.type === "exam_warning" ? "⚠️ [EXAM WARNING]" : "🎙️ [INTUITION]";
+        const ts = ins.timestamp ? ` (${ins.timestamp})` : "";
+        md += `### ${icon} ${ins.title || "Insight"}${ts}\n`;
+        md += `${ins.content || ins.text || ""}\n\n`;
+      });
+      md += `---\n\n`;
+    }
+
+    md += `## 📝 Distilled Lecture Notes\n\n`;
+    md += `${lecture.content}\n`;
+
+    const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${lecture.id || `lecture-w${lecture.week}`}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const exportLecturePackJson = () => {
+    const pack = {
+      version: "1.0",
+      layer: "lectures",
+      courseId,
+      exportedAt: new Date().toISOString(),
+      lectures,
+      insights: lectures.flatMap((l) => l.insights || [])
+    };
+    const blob = new Blob([JSON.stringify(pack, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${courseId}_lectures_pack.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
       {/* Header Bar */}
@@ -350,6 +405,10 @@ export default function LecturesPage() {
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
                 <span><strong>Echo360 Timestamp Links:</strong> Clicking any timestamp jumps directly to that second in Echo360.</span>
               </li>
+              <li className="flex items-start gap-1.5">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                <span><strong>Export Notes & Insights:</strong> 1-click download of notes as Markdown (<code className="text-zinc-200">.md</code>) or Layer 2 Lecture Packs (<code className="text-zinc-200">.json</code>).</span>
+              </li>
             </ul>
           </div>
 
@@ -383,7 +442,7 @@ export default function LecturesPage() {
               </li>
               <li className="flex items-start gap-1.5">
                 <CheckCircle2 className="w-3.5 h-3.5 text-indigo-400 shrink-0 mt-0.5" />
-                <span><strong>Direct-to-Disk Injection:</strong> 1-click push to save insights permanently into your local Git Markdown files.</span>
+                <span><strong>Direct-to-Disk Injection:</strong> 1-click push to save insights permanently into your private course Markdown files on disk (<code className="text-zinc-200">courses/</code>).</span>
               </li>
             </ul>
           </div>
@@ -479,19 +538,39 @@ export default function LecturesPage() {
                   <span className="text-xs font-bold text-violet-400 uppercase tracking-wider">
                     Week {selectedLecture.week} • Lecture Notes
                   </span>
-                  {selectedLecture.echo360Url && (
-                    <a
-                      href={selectedLecture.echo360Url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1 font-semibold"
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => exportLectureMarkdown(selectedLecture)}
+                      className="px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition border border-zinc-700 cursor-pointer"
+                      title="Download this lecture's notes and insights as Markdown (.md)"
                     >
-                      <span>Open in Echo360</span>
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </a>
-                  )}
+                      <FileDown className="w-3.5 h-3.5 text-violet-400" />
+                      <span>Export .md</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={exportLecturePackJson}
+                      className="px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition border border-zinc-700 cursor-pointer"
+                      title="Export all lectures and insights as a JSON Lecture Pack"
+                    >
+                      <Download className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>Export Pack (.json)</span>
+                    </button>
+                    {selectedLecture.echo360Url && (
+                      <a
+                        href={selectedLecture.echo360Url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1 font-semibold ml-1"
+                      >
+                        <span>Open in Echo360</span>
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                    )}
+                  </div>
                 </div>
-                <h2 className="text-2xl font-black text-white mt-1">{selectedLecture.title}</h2>
+                <h2 className="text-2xl font-black text-white mt-2">{selectedLecture.title}</h2>
               </div>
 
               {/* Spoken Intuitions Callouts */}
