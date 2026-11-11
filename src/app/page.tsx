@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { COURSE_CONFIG } from "@/course.config";
 import { isDueToday } from "@/lib/sm2-service";
-import { loadActiveCourseData, setActiveCourseId } from "@/lib/pack-loader";
+import { loadActiveCourseData, setActiveCourseId, getCourseCatalog } from "@/lib/pack-loader";
 
 export default function DashboardPage() {
   const [questions, setQuestions] = useState<QuestionMeta[]>([]);
@@ -33,6 +33,21 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const courseId = localStorage.getItem("math_active_course") || "sample1001";
+
+    getCourseCatalog()
+      .then((catalog) => {
+        const current = catalog.find((c) => c.id.toLowerCase() === courseId.toLowerCase());
+        if (current) {
+          setCourseInfo({
+            code: current.code,
+            name: current.name,
+            description: current.description || "",
+            id: current.id
+          });
+        }
+      })
+      .catch(() => {});
+
     Promise.all([
       fetch(`/api/questions?course=${courseId}`, { cache: "no-store" }).then((res) => {
         if (!res.ok) throw new Error("API not available");

@@ -100,7 +100,13 @@ export function saveQuestionToCustomCourse(courseId: string, question: Question)
 export function isLocalStudio(): boolean {
   if (typeof window === "undefined") return false;
   const host = window.location.hostname;
-  return host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0";
+  return (
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host === "0.0.0.0" ||
+    host === "::1" ||
+    host.endsWith(".local")
+  );
 }
 
 /** Get basePath for GitHub Pages hosting (e.g. /course-noting) */
@@ -140,9 +146,25 @@ export async function getCourseCatalog(): Promise<CourseCatalogItem[]> {
   });
 
   try {
-    const res = await fetch(`${getBasePath()}/data/catalog.json`, { cache: "no-cache" });
-    if (!res.ok) throw new Error("Catalog fetch failed");
-    const staticCatalog: CourseCatalogItem[] = await res.json();
+    let staticCatalog: CourseCatalogItem[] = [];
+
+    // In Localhost Studio, attempt to load the full local catalog (protected from Git)
+    if (isLocalStudio()) {
+      try {
+        const localRes = await fetch(`${getBasePath()}/data/catalog.local.json`, { cache: "no-cache" });
+        if (localRes.ok) {
+          staticCatalog = await localRes.json();
+        }
+      } catch {}
+    }
+
+    // Fallback or Production/GitHub Pages: Load public repository catalog (demo only)
+    if (!staticCatalog || staticCatalog.length === 0) {
+      const res = await fetch(`${getBasePath()}/data/catalog.json`, { cache: "no-cache" });
+      if (!res.ok) throw new Error("Catalog fetch failed");
+      staticCatalog = await res.json();
+    }
+
     const seen = new Set<string>();
     const merged: CourseCatalogItem[] = [];
     for (const item of [...customItems, ...staticCatalog]) {

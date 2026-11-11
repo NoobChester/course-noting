@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getQuestionById, getConceptBySlug } from "@/lib/file-service";
 import { saveUserQuestionData } from "@/lib/user-service";
 import { Concept, ProofReviewResult } from "@/lib/types";
+import { resolveGeminiModel } from "@/lib/gemini-client";
 
 function extractJson(text: string): any {
   let cleaned = text.trim();
@@ -26,6 +27,10 @@ export async function POST(req: Request) {
       studentSolution,
       apiKey,
       provider = "gemini",
+      model,
+      geminiModel,
+      openaiModel,
+      anthropicModel,
       ollamaUrl,
       ollamaModel
     } = await req.json();
@@ -99,8 +104,9 @@ Audit the student's proof and output the JSON review:`;
         return NextResponse.json({ error: "Missing Gemini API key" }, { status: 400 });
       }
 
+      const targetModel = await resolveGeminiModel(key, geminiModel || model);
       const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${key}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -121,7 +127,7 @@ Audit the student's proof and output the JSON review:`;
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error?.message || "Gemini API request failed");
+        throw new Error(data.error?.message || `Gemini API request failed for model ${targetModel}`);
       }
 
       const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
@@ -132,6 +138,7 @@ Audit the student's proof and output the JSON review:`;
         return NextResponse.json({ error: "Missing OpenAI API key" }, { status: 400 });
       }
 
+      const targetModel = openaiModel || model || "gpt-4o-mini";
       const res = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -139,7 +146,7 @@ Audit the student's proof and output the JSON review:`;
           Authorization: `Bearer ${key}`
         },
         body: JSON.stringify({
-          model: "gpt-4o-mini",
+          model: targetModel,
           temperature: 0.2,
           response_format: { type: "json_object" },
           messages: [
@@ -151,7 +158,7 @@ Audit the student's proof and output the JSON review:`;
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error?.message || "OpenAI API request failed");
+        throw new Error(data.error?.message || `OpenAI API request failed for model ${targetModel}`);
       }
 
       const rawText = data.choices?.[0]?.message?.content || "";
@@ -162,6 +169,7 @@ Audit the student's proof and output the JSON review:`;
         return NextResponse.json({ error: "Missing Anthropic API key" }, { status: 400 });
       }
 
+      const targetModel = anthropicModel || model || "claude-3-5-sonnet-20241022";
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: {
@@ -170,7 +178,7 @@ Audit the student's proof and output the JSON review:`;
           "anthropic-version": "2023-06-01"
         },
         body: JSON.stringify({
-          model: "claude-3-5-sonnet-20241022",
+          model: targetModel,
           max_tokens: 2000,
           temperature: 0.2,
           system: systemPrompt,

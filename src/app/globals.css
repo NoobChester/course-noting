@@ -32,6 +32,15 @@ body {
 /* Math formatting tweaks */
 .katex-display {
   margin: 0.5em 0 !important;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+}
+
+.katex {
+  font-size: 1.05em;
+  max-width: 100%;
 }
 
 @media print {

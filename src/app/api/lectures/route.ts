@@ -6,10 +6,24 @@ import { LectureNote } from "@/lib/types";
 
 const COURSES_DIR = path.join(process.cwd(), "courses");
 
+function safeMatterStringify(content: string = "", frontmatter: Record<string, any> = {}): string {
+  const cleanContent = String(content || "");
+  const cleanFrontmatter: Record<string, any> = {};
+  for (const [key, value] of Object.entries(frontmatter)) {
+    if (value !== undefined) {
+      cleanFrontmatter[key] = value;
+    }
+  }
+  const fullyCleaned = JSON.parse(
+    JSON.stringify(cleanFrontmatter, (key, val) => (val === undefined ? undefined : val))
+  );
+  return matter.stringify(cleanContent, fullyCleaned);
+}
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const courseId = (searchParams.get("course") || "math3701").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const courseId = (searchParams.get("course") || "sample1001").toUpperCase().replace(/[^A-Z0-9]/g, "");
 
     const lecturesDir = path.join(COURSES_DIR, courseId, "lectures");
 
@@ -62,7 +76,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { courseId = "math3701", note } = body as { courseId: string; note: LectureNote };
+    const { courseId = "sample1001", note } = body as { courseId: string; note: LectureNote };
 
     if (!note || !note.id) {
       return NextResponse.json({ error: "Missing lecture note payload" }, { status: 400 });
@@ -95,7 +109,7 @@ export async function POST(req: NextRequest) {
     frontmatter.createdAt = note.createdAt || new Date().toISOString();
     frontmatter.updatedAt = new Date().toISOString();
 
-    const fileContent = matter.stringify(note.content, frontmatter);
+    const fileContent = safeMatterStringify(note.content, frontmatter);
     await fs.writeFile(filePath, fileContent, "utf-8");
 
     return NextResponse.json({ success: true, id: safeId });

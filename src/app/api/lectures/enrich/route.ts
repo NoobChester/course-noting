@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { LectureInsight, QuestionHintInsight } from "@/lib/types";
+import { resolveGeminiModel } from "@/lib/gemini-client";
 
 function pruneTranscriptNoise(rawText: string): string {
   const lines = rawText.split("\n");
@@ -44,8 +45,12 @@ export async function POST(req: NextRequest) {
       lectureTitle = "Lecture Notes",
       slideText = "",
       transcriptText = "",
-      provider = "ollama",
+      provider = "gemini",
       apiKey,
+      model,
+      geminiModel,
+      openaiModel,
+      anthropicModel,
       ollamaUrl = "http://localhost:11434",
       ollamaModel = "qwen2.5:7b-instruct"
     } = await req.json();
@@ -109,8 +114,9 @@ Extract the high-yield value JSON now:`;
       const key = apiKey || process.env.GEMINI_API_KEY;
       if (!key) return NextResponse.json({ error: "Missing Gemini API key" }, { status: 400 });
 
+      const targetModel = await resolveGeminiModel(key, geminiModel || model);
       const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${key}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -121,13 +127,14 @@ Extract the high-yield value JSON now:`;
         }
       );
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error?.message || "Gemini API failed");
+      if (!res.ok) throw new Error(data.error?.message || `Gemini API failed for model ${targetModel}`);
       const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
       parsedResult = extractJson(rawText);
     } else if (provider === "anthropic") {
       const key = apiKey || process.env.ANTHROPIC_API_KEY;
       if (!key) return NextResponse.json({ error: "Missing Anthropic API key" }, { status: 400 });
 
+      const targetModel = anthropicModel || model || "claude-3-5-sonnet-20241022";
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: {
@@ -136,20 +143,21 @@ Extract the high-yield value JSON now:`;
           "anthropic-version": "2023-06-01"
         },
         body: JSON.stringify({
-          model: "claude-3-5-sonnet-20241022",
+          model: targetModel,
           max_tokens: 3000,
           system: systemPrompt,
           messages: [{ role: "user", content: userPrompt }]
         })
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error?.message || "Anthropic API failed");
+      if (!res.ok) throw new Error(data.error?.message || `Anthropic API failed for model ${targetModel}`);
       const rawText = data.content?.[0]?.text || "{}";
       parsedResult = extractJson(rawText);
     } else if (provider === "openai") {
       const key = apiKey || process.env.OPENAI_API_KEY;
       if (!key) return NextResponse.json({ error: "Missing OpenAI API key" }, { status: 400 });
 
+      const targetModel = openaiModel || model || "gpt-4o-mini";
       const res = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -157,7 +165,7 @@ Extract the high-yield value JSON now:`;
           Authorization: `Bearer ${key}`
         },
         body: JSON.stringify({
-          model: "gpt-4o",
+          model: targetModel,
           response_format: { type: "json_object" },
           messages: [
             { role: "system", content: systemPrompt },
@@ -166,16 +174,17 @@ Extract the high-yield value JSON now:`;
         })
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error?.message || "OpenAI API failed");
+      if (!res.ok) throw new Error(data.error?.message || `OpenAI API failed for model ${targetModel}`);
       const rawText = data.choices?.[0]?.message?.content || "{}";
       parsedResult = extractJson(rawText);
     } else {
-      // Default: Ollama (Local on RTX 3060)
+      // Default: Ollama (Local)
+      const targetModel = ollamaModel || model || "qwen2.5:7b-instruct";
       const res = await fetch(`${ollamaUrl}/api/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: ollamaModel,
+          model: targetModel,
           prompt: `${systemPrompt}\n\n${userPrompt}`,
           stream: false,
           format: "json",
@@ -183,7 +192,7 @@ Extract the high-yield value JSON now:`;
         })
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Ollama API failed");
+      if (!res.ok) throw new Error(data.error || `Ollama API failed for model ${targetModel}`);
       parsedResult = extractJson(data.response);
     }
 

@@ -5,6 +5,20 @@ import matter from "gray-matter";
 
 const COURSES_DIR = path.join(process.cwd(), "courses");
 
+function safeMatterStringify(content: string = "", frontmatter: Record<string, any> = {}): string {
+  const cleanContent = String(content || "");
+  const cleanFrontmatter: Record<string, any> = {};
+  for (const [key, value] of Object.entries(frontmatter)) {
+    if (value !== undefined) {
+      cleanFrontmatter[key] = value;
+    }
+  }
+  const fullyCleaned = JSON.parse(
+    JSON.stringify(cleanFrontmatter, (key, val) => (val === undefined ? undefined : val))
+  );
+  return matter.stringify(cleanContent, fullyCleaned);
+}
+
 export async function POST(req: NextRequest) {
   try {
     const {
@@ -33,7 +47,7 @@ export async function POST(req: NextRequest) {
       const injectionBlock = `\n\n### 🎙️ ${title}${timestampTag}\n${snippet.trim()}\n`;
 
       const updatedContent = content + injectionBlock;
-      const updatedFile = matter.stringify(updatedContent, {
+      const updatedFile = safeMatterStringify(updatedContent, {
         ...data,
         updatedAt: new Date().toISOString()
       });
@@ -61,7 +75,7 @@ export async function POST(req: NextRequest) {
         updatedContent += `\n\n<!-- split:hints -->\n### Hints & Key Steps\n${hintAddition}`;
       }
 
-      const updatedFile = matter.stringify(updatedContent, {
+      const updatedFile = safeMatterStringify(updatedContent, {
         ...data,
         updatedAt: new Date().toISOString()
       });

@@ -305,7 +305,8 @@ export function QuestionWorkspaceClient({ id }: { id: string }) {
             prompt: question?.content.prompt || "",
             official: question?.content.official,
             studentSolution: solutionText,
-            apiKey: apiKey.trim()
+            apiKey: apiKey.trim(),
+            model: aiSettings.geminiModel
           });
 
           setReviewResult(result);
@@ -322,6 +323,15 @@ export function QuestionWorkspaceClient({ id }: { id: string }) {
       }
 
       // Local Studio: Call local Node API proxy
+      const chosenModel =
+        aiSettings.provider === "gemini"
+          ? aiSettings.geminiModel
+          : aiSettings.provider === "openai"
+          ? aiSettings.openaiModel
+          : aiSettings.provider === "anthropic"
+          ? aiSettings.anthropicModel
+          : aiSettings.ollamaModel;
+
       const res = await fetch("/api/ai/review", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -331,6 +341,10 @@ export function QuestionWorkspaceClient({ id }: { id: string }) {
           studentSolution: solutionText,
           apiKey,
           provider: aiSettings.provider,
+          model: chosenModel,
+          geminiModel: aiSettings.geminiModel,
+          openaiModel: aiSettings.openaiModel,
+          anthropicModel: aiSettings.anthropicModel,
           ollamaUrl: aiSettings.ollamaUrl,
           ollamaModel: aiSettings.ollamaModel
         })

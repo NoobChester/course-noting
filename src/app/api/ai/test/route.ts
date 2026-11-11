@@ -1,9 +1,19 @@
 import { NextResponse } from "next/server";
+import { resolveGeminiModel } from "@/lib/gemini-client";
 
 export async function POST(req: Request) {
   const startTime = Date.now();
   try {
-    const { provider, apiKey, ollamaUrl, ollamaModel } = await req.json();
+    const {
+      provider,
+      apiKey,
+      model,
+      geminiModel,
+      openaiModel,
+      anthropicModel,
+      ollamaUrl,
+      ollamaModel
+    } = await req.json();
 
     if (provider === "gemini") {
       const key = apiKey || process.env.GEMINI_API_KEY;
@@ -11,8 +21,9 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Missing Gemini API key" }, { status: 400 });
       }
 
+      const targetModel = await resolveGeminiModel(key, geminiModel || model);
       const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${key}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -24,13 +35,13 @@ export async function POST(req: Request) {
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error?.message || "Gemini API rejected key");
+        throw new Error(data.error?.message || `Gemini API rejected key for model ${targetModel}`);
       }
 
       const latencyMs = Date.now() - startTime;
       return NextResponse.json({
         success: true,
-        model: "Gemini 1.5 Flash",
+        model: `Google Gemini (${targetModel})`,
         latencyMs
       });
     }
@@ -41,6 +52,7 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Missing OpenAI API key" }, { status: 400 });
       }
 
+      const targetModel = openaiModel || model || "gpt-4o-mini";
       const res = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -48,7 +60,7 @@ export async function POST(req: Request) {
           Authorization: `Bearer ${key}`
         },
         body: JSON.stringify({
-          model: "gpt-4o-mini",
+          model: targetModel,
           messages: [{ role: "user", content: "Ping test. Respond with 'PONG'." }],
           max_tokens: 10
         })
@@ -56,13 +68,13 @@ export async function POST(req: Request) {
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error?.message || "OpenAI API rejected key");
+        throw new Error(data.error?.message || `OpenAI API rejected key for model ${targetModel}`);
       }
 
       const latencyMs = Date.now() - startTime;
       return NextResponse.json({
         success: true,
-        model: "GPT-4o Mini",
+        model: `OpenAI (${targetModel})`,
         latencyMs
       });
     }
@@ -73,6 +85,7 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Missing Anthropic API key" }, { status: 400 });
       }
 
+      const targetModel = anthropicModel || model || "claude-3-5-sonnet-20241022";
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: {
@@ -81,7 +94,7 @@ export async function POST(req: Request) {
           "anthropic-version": "2023-06-01"
         },
         body: JSON.stringify({
-          model: "claude-3-5-sonnet-20241022",
+          model: targetModel,
           max_tokens: 10,
           messages: [{ role: "user", content: "Ping test. Respond with 'PONG'." }]
         })
@@ -89,39 +102,40 @@ export async function POST(req: Request) {
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error?.message || "Anthropic API rejected key");
+        throw new Error(data.error?.message || `Anthropic API rejected key for model ${targetModel}`);
       }
 
       const latencyMs = Date.now() - startTime;
       return NextResponse.json({
         success: true,
-        model: "Claude 3.5 Sonnet",
+        model: `Anthropic (${targetModel})`,
         latencyMs
       });
     }
 
     if (provider === "ollama") {
-      const targetUrl = (ollamaUrl || "http://localhost:11434").replace(/\/$/, "");
-      const model = ollamaModel || "llama3";
+      const targetUrl = ollamaUrl || "http://localhost:11434";
+      const targetModel = ollamaModel || model || "llama3";
 
       const res = await fetch(`${targetUrl}/api/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model,
+          model: targetModel,
           prompt: "Ping test. Respond with 'PONG'.",
           stream: false
         })
       });
 
+      const data = await res.json();
       if (!res.ok) {
-        throw new Error(`Ollama server at ${targetUrl} returned HTTP ${res.status}`);
+        throw new Error(data.error || `Ollama rejected model ${targetModel}`);
       }
 
       const latencyMs = Date.now() - startTime;
       return NextResponse.json({
         success: true,
-        model: `Ollama (${model})`,
+        model: `Ollama (${targetModel})`,
         latencyMs
       });
     }

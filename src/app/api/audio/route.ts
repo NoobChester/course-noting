@@ -17,11 +17,19 @@ export async function GET(req: NextRequest) {
   const safeFilename = path.basename(filename);
   const cleanCourseId = courseId.toUpperCase().replace(/[^A-Z0-9]/g, "");
 
-  // Search inside courses/<COURSE>/raw_files/audio/
-  const audioPath = path.join(COURSES_DIR, cleanCourseId, "raw_files", "audio", safeFilename);
+  // Search inside courses/<COURSE>/raw_files/audio/ or fallback courses/<COURSE>/audio/
+  let audioPath = path.join(COURSES_DIR, cleanCourseId, "raw_files", "audio", safeFilename);
+  if (!fs.existsSync(audioPath)) {
+    const altAudioPath = path.join(COURSES_DIR, cleanCourseId, "audio", safeFilename);
+    if (fs.existsSync(altAudioPath)) {
+      audioPath = altAudioPath;
+    }
+  }
 
   if (!fs.existsSync(audioPath)) {
-    return NextResponse.json({ error: "Audio file not found on disk" }, { status: 404 });
+    return NextResponse.json({ 
+      error: `Audio file '${safeFilename}' not found. Please place it in courses/${cleanCourseId}/raw_files/audio/ or courses/${cleanCourseId}/audio/` 
+    }, { status: 404 });
   }
 
   const stat = fs.statSync(audioPath);

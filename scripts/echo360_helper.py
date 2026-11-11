@@ -2,7 +2,7 @@
 """
 scripts/echo360_helper.py
 Lightweight, tailored Echo360 helper extracted from soraxas/echo360.
-- Connects to UNSW Echo360 (echo360.org.au)
+- Connects to UNSW Echo360 (echo360.net.au)
 - Supports one-time interactive Chrome login for 2FA / SSO
 - Caches session cookies in .echo360_session/
 - Fetches Transcripts (.txt and .vtt)
@@ -15,6 +15,7 @@ import json
 import re
 import argparse
 import subprocess
+from urllib.parse import urlparse
 import requests
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -25,7 +26,7 @@ MEDIA_ID_RE = re.compile(r'\\?"mediaId\\?"\s*:\s*\\?"([0-9a-fA-F-]{36})')
 CAPTIONS_VTT_RE = re.compile(r'https://captions\.[^"\'\s\\]+?\.vtt')
 M3U8_AUDIO_RE = re.compile(r'URI="([^"]*s0q\d+\.m3u8[^"]*)"', re.IGNORECASE)
 
-def setup_interactive_login(course_url="https://echo360.org.au"):
+def setup_interactive_login(course_url="https://echo360.net.au"):
     """Launches Chrome for user to complete SSO and Microsoft 2FA push once."""
     print("Launching Chrome for Echo360 Single Sign-On (SSO / 2FA)...")
     os.makedirs(SESSION_DIR, exist_ok=True)
@@ -127,11 +128,12 @@ def main():
     parser.add_argument("--url", help="Echo360 Course or Lesson URL")
     parser.add_argument("--course", default="MATH3701", help="Course code folder")
     parser.add_argument("--audio", action="store_true", help="Also download audio stream (.m4a)")
+    parser.add_argument("--all", action="store_true", help="Batch download all lectures in the course section")
     
     args = parser.parse_args()
 
     if args.login:
-        setup_interactive_login(args.url or "https://echo360.org.au")
+        setup_interactive_login(args.url or "https://echo360.net.au")
         return
 
     if not args.url:
@@ -143,6 +145,79 @@ def main():
         print("No active login session found. Run with --login first!")
         return
 
+    parsed_domain = urlparse(args.url)
+    base_domain = f"{parsed_domain.scheme}://{parsed_domain.netloc}" if parsed_domain.netloc else "https://echo360.net.au"
+
+    # Output directory
+    out_dir = os.path.join(BASE_DIR, "courses", args.course.upper(), "raw_files")
+    os.makedirs(os.path.join(out_dir, "transcripts"), exist_ok=True)
+    os.makedirs(os.path.join(out_dir, "audio"), exist_ok=True)
+
+    # Check if batch mode (--all or section URL without /lesson/)
+    is_section = "/section/" in args.url and "/lesson/" not in args.url
+    if args.all or is_section:
+        sec_match = re.search(r'/section/([0-9a-fA-F-]{36}|[0-9a-zA-Z_-]+)', args.url)
+        if not sec_match:
+            print("Could not extract section UUID from URL.")
+            return
+
+        section_id = sec_match.group(1)
+        syllabus_url = f"{base_domain}/section/{section_id}/syllabus"
+        print(f"Fetching syllabus for section {section_id}...")
+        syl_res = session.get(syllabus_url)
+
+        lessons = []
+        if syl_res.status_code == 200:
+            try:
+                syl_data = syl_res.json()
+                raw_items = syl_data if isinstance(syl_data, list) else (syl_data.get("data") or syl_data.get("lessons") or [])
+                for idx, entry in enumerate(raw_items):
+                    l = entry.get("lesson", {}).get("lesson") or entry.get("lesson") or entry
+                    lid = l.get("id") or entry.get("id")
+                    title = l.get("name") or l.get("title") or f"Lecture {idx + 1}"
+                    medias = l.get("medias", [])
+                    mid = None
+                    if medias and isinstance(medias, list):
+                        mid = medias[0].get("id")
+                    mid = mid or l.get("mediaId") or lid
+                    if mid:
+                        lessons.append({"lesson_id": lid, "media_id": mid, "title": title})
+            except Exception as e:
+                print(f"Error parsing syllabus JSON: {e}")
+
+        if not lessons:
+            print("No lectures found via /syllabus endpoint. Attempting page HTML scan...")
+            r_home = session.get(f"{base_domain}/section/{section_id}/home")
+            for mid in set(MEDIA_ID_RE.findall(r_home.text)):
+                lessons.append({"lesson_id": mid, "media_id": mid, "title": f"Lecture ({mid[:8]})"})
+
+        print(f"Found {len(lessons)} lectures in section. Processing all...")
+        for i, lec in enumerate(lessons):
+            print(f"\n--- [{i+1}/{len(lessons)}] {lec['title']} (Media: {lec['media_id']}) ---")
+            # 1. Transcript
+            tr_url = f"{base_domain}/api/ui/echoplayer/media/{lec['media_id']}/transcript"
+            t_res = session.get(tr_url)
+            if t_res.status_code == 200:
+                lines = transcript_json_to_lines(t_res.json())
+                txt_path = os.path.join(out_dir, "transcripts", f"lecture_{lec['media_id']}.txt")
+                with open(txt_path, "w", encoding="utf-8") as f:
+                    f.write("\n".join(lines))
+                print(f"  ✓ Saved clean transcript ({len(lines)} cues)")
+
+            # 2. Audio
+            if args.audio:
+                lesson_url = f"{base_domain}/lesson/{lec['lesson_id']}/classroom"
+                l_res = session.get(lesson_url)
+                if l_res.status_code == 200:
+                    m3u8_matches = M3U8_AUDIO_RE.findall(l_res.text)
+                    if m3u8_matches:
+                        audio_out = os.path.join(out_dir, "audio", f"lecture_{lec['media_id']}.m4a")
+                        download_audio_stream(m3u8_matches[0], audio_out, session=session)
+
+        print("\nAll section lectures processed successfully!")
+        return
+
+    # Single lecture processing
     print(f"Connecting to {args.url}...")
     r = session.get(args.url)
     if r.status_code != 200:
@@ -163,7 +238,9 @@ def main():
     os.makedirs(os.path.join(out_dir, "audio"), exist_ok=True)
 
     # 1. Fetch transcript
-    transcript_url = f"https://echo360.org.au/api/ui/echoplayer/media/{media_id}/transcript"
+    parsed_domain = urlparse(args.url)
+    base_domain = f"{parsed_domain.scheme}://{parsed_domain.netloc}" if parsed_domain.netloc else "https://echo360.net.au"
+    transcript_url = f"{base_domain}/api/ui/echoplayer/media/{media_id}/transcript"
     tr_res = session.get(transcript_url)
     
     if tr_res.status_code == 200:
@@ -172,6 +249,16 @@ def main():
         with open(txt_path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines))
         print(f"Saved clean transcript ({len(lines)} cues): {txt_path}")
+
+    # 2. Download audio if requested
+    if args.audio:
+        m3u8_matches = M3U8_AUDIO_RE.findall(r.text)
+        if m3u8_matches:
+            m3u8_url = m3u8_matches[0]
+            audio_out = os.path.join(out_dir, "audio", f"lecture_{media_id}.m4a")
+            download_audio_stream(m3u8_url, audio_out, session=session)
+        else:
+            print("No audio stream URL found in lecture HTML.")
 
     print("\nEcho360 extraction completed!")
 

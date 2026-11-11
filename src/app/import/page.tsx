@@ -28,7 +28,7 @@ import {
 
 export default function ImportPage() {
   const router = useRouter();
-  const [isLocal, setIsLocal] = useState(true);
+  const [isLocal, setIsLocal] = useState(false);
   const [courseId, setCourseId] = useState("sample1001");
   const [courseMeta, setCourseMeta] = useState<CourseMeta | null>(null);
   const [existingQuestions, setExistingQuestions] = useState<QuestionMeta[]>([]);
@@ -329,20 +329,46 @@ export default function ImportPage() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2 border-t border-zinc-800/80 text-xs">
-          <div className="p-3 rounded-xl bg-zinc-950/60 border border-zinc-800 space-y-1">
-            <div className="font-bold text-amber-400 flex items-center gap-1.5">
-              <Globe className="w-3.5 h-3.5" />
-              <span>On GitHub Pages (Static Web App)</span>
+          <div
+            className={`p-3 rounded-xl border space-y-1 transition-all ${
+              !isLocal
+                ? "bg-amber-950/20 border-amber-500/40 ring-1 ring-amber-500/20"
+                : "bg-zinc-950/60 border-zinc-800 opacity-80 hover:opacity-100"
+            }`}
+          >
+            <div className={`font-bold flex items-center justify-between ${!isLocal ? "text-amber-400" : "text-zinc-300"}`}>
+              <span className="flex items-center gap-1.5">
+                <Globe className="w-3.5 h-3.5" />
+                <span>On GitHub Pages {!isLocal && "(Active Now)"}</span>
+              </span>
+              {!isLocal && (
+                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-950/60 text-amber-300 border border-amber-800/40 font-semibold">
+                  Active
+                </span>
+              )}
             </div>
             <p className="text-zinc-400 leading-relaxed text-[11px]">
               Runs 100% client-side in your browser without a backend. You can upload or paste screenshot images right here; cropped snippets and imported questions are saved into browser <code className="text-zinc-300">localStorage</code> and can be exported via the Save/Backup manager.
             </p>
           </div>
 
-          <div className="p-3 rounded-xl bg-zinc-950/60 border border-zinc-800 space-y-1">
-            <div className="font-bold text-indigo-400 flex items-center gap-1.5">
-              <HardDrive className="w-3.5 h-3.5" />
-              <span>On Localhost Studio (Your Computer)</span>
+          <div
+            className={`p-3 rounded-xl border space-y-1 transition-all ${
+              isLocal
+                ? "bg-indigo-950/20 border-indigo-500/40 ring-1 ring-indigo-500/20"
+                : "bg-zinc-950/60 border-zinc-800 opacity-80 hover:opacity-100"
+            }`}
+          >
+            <div className={`font-bold flex items-center justify-between ${isLocal ? "text-indigo-400" : "text-zinc-300"}`}>
+              <span className="flex items-center gap-1.5">
+                <HardDrive className="w-3.5 h-3.5" />
+                <span>On Localhost Studio {isLocal && "(Active Now)"}</span>
+              </span>
+              {isLocal && (
+                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-indigo-950/60 text-indigo-300 border border-indigo-800/40 font-semibold">
+                  Active
+                </span>
+              )}
             </div>
             <p className="text-zinc-400 leading-relaxed text-[11px]">
               Running <code className="text-indigo-300">npm run dev</code> unlocks direct filesystem storage: automatically renders multi-page PDF problem sheets, saves cropped PNG files to <code className="text-zinc-300">public/uploads/</code>, and creates persistent Markdown question files on your hard drive.

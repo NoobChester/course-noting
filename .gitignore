@@ -65,10 +65,11 @@ __pycache__/
 !/courses/.gitkeep
 !/courses.example/
 
-# Static data packs: allow sample demo pack & catalog, ignore real university packs
+# Static data packs: allow sample demo pack & catalog, ignore real university packs and local catalog
 /public/data/*
 !/public/data/catalog.json
 !/public/data/sample1001_base.json
 !/public/data/sample1001_lectures.json
+/public/data/catalog.local.json
 
 

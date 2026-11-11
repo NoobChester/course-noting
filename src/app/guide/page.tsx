@@ -23,7 +23,9 @@ import {
   Check,
   Lightbulb,
   ExternalLink,
-  ChevronRight
+  ChevronRight,
+  Volume2,
+  Headphones
 } from "lucide-react";
 
 export default function GuidePage() {
@@ -388,39 +390,134 @@ export default function GuidePage() {
                   <span>Lecture Intelligence & Spoken Insights</span>
                 </h2>
                 <p className="text-sm text-zinc-300 leading-relaxed">
-                  Lecturers often drop invaluable verbal hints, geometric intuitions, and exam warnings that never appear on the lecture slides:
+                  Lecturers often drop invaluable verbal hints, geometric intuitions, and exam warnings that never appear on the lecture slides. Course Noting automatically bridges the gap between raw recordings and structured study notes.
                 </p>
               </div>
 
-              <div className="space-y-4">
-                <div className="p-5 rounded-xl bg-zinc-900/60 border border-zinc-800 space-y-3">
-                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                    <span className="text-base">🎙️</span>
-                    <span>Spoken Intuitions vs. Formal Definitions</span>
-                  </h3>
-                  <p className="text-xs text-zinc-300 leading-relaxed">
-                    While textbooks present rigid definitions, lecturers explain the real mental picture (e.g. &ldquo;Euler characteristic is just a topological fingerprint measuring holes and handles&rdquo;). These are tagged and surfaced right above the theorems.
+              {/* 3-Step Ingestion Pipeline */}
+              <div className="p-5 rounded-2xl bg-zinc-900/80 border border-zinc-800 space-y-4">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-violet-400" />
+                  <span>The 3-Step Ingestion & Distillation Pipeline</span>
+                </h3>
+                
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                  <div className="p-3.5 rounded-xl bg-zinc-950/70 border border-zinc-800 space-y-2">
+                    <div className="font-bold text-violet-400 flex items-center gap-2">
+                      <span className="w-5 h-5 rounded-full bg-violet-500/20 text-violet-300 flex items-center justify-center text-[10px] font-mono">1</span>
+                      <span>Source Ingest</span>
+                    </div>
+                    <p className="text-zinc-400 text-[11px] leading-relaxed">
+                      Auto-download audio & transcripts via <code className="text-zinc-200">scripts/echo360_helper.py</code> or drop your own <code className="text-zinc-200">.vtt</code>/<code className="text-zinc-200">.txt</code> and <code className="text-zinc-200">.m4a</code> files into the Ingest modal.
+                    </p>
+                  </div>
+
+                  <div className="p-3.5 rounded-xl bg-zinc-950/70 border border-zinc-800 space-y-2">
+                    <div className="font-bold text-amber-400 flex items-center gap-2">
+                      <span className="w-5 h-5 rounded-full bg-amber-500/20 text-amber-300 flex items-center justify-center text-[10px] font-mono">2</span>
+                      <span>AI Synthesis</span>
+                    </div>
+                    <p className="text-zinc-400 text-[11px] leading-relaxed">
+                      AI correlates slide theorems with the spoken transcript to extract verbal intuitions (<span className="text-violet-300">🎙️</span>) and lecturer exam warnings (<span className="text-amber-300">⚠️</span>) with exact timestamps.
+                    </p>
+                  </div>
+
+                  <div className="p-3.5 rounded-xl bg-zinc-950/70 border border-zinc-800 space-y-2">
+                    <div className="font-bold text-emerald-400 flex items-center gap-2">
+                      <span className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-300 flex items-center justify-center text-[10px] font-mono">3</span>
+                      <span>Layer 2 Injection</span>
+                    </div>
+                    <p className="text-zinc-400 text-[11px] leading-relaxed">
+                      Click &ldquo;Push to Concept / Question&rdquo; to inject high-yield warnings right into problem sheet hints and theory cheat sheets. Toggle on/off globally with one click.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Echo360 Helper Guide */}
+              <div className="p-5 rounded-xl bg-zinc-900/60 border border-zinc-800 space-y-3">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-violet-400" />
+                  <span>Option A: Batch Auto-Process Entire Course (100% Browser GUI)</span>
+                </h3>
+                <p className="text-xs text-zinc-300 leading-relaxed">
+                  No terminal commands needed! Process an entire semester of lectures automatically in one go:
+                </p>
+                <div className="space-y-2 text-xs">
+                  <div className="p-3 rounded-lg bg-zinc-950 text-[11px] text-zinc-300 border border-zinc-800 space-y-1.5">
+                    <div>1. <strong>Connect Session:</strong> Open <a href="https://echo360.net.au" target="_blank" rel="noopener noreferrer" className="text-violet-300 underline font-mono">echo360.net.au</a>, open DevTools (<kbd className="px-1 py-0.5 rounded bg-zinc-800 text-[10px]">F12</kbd> &gt; Network tab), right-click any request and select <strong>Copy &gt; Copy as cURL</strong> (or Copy request headers), then paste into the GUI. <em>(Note: Echo360 tokens are HttpOnly so copying via Network tab is required instead of document.cookie)</em>.</div>
+                    <div>2. <strong>Auto-Discover Syllabus:</strong> Paste your Echo360 course section URL (<code className="text-violet-300">https://echo360.net.au/section/.../home</code> or syllabus link, or click &ldquo;Try Demo 8-Week Course Syllabus&rdquo;) and click <strong>&ldquo;Auto-Discover All Lectures&rdquo;</strong>. The studio maps every lecture, week, and media stream across the entire semester!</div>
+                    <div>3. <strong>1-Click Batch Processing:</strong> Click <strong>&ldquo;⚡ Start Batch Processing&rdquo;</strong>. The studio automatically processes each lecture sequentially: fetches clean transcripts, extracts audio streams via FFmpeg, distills AI definitions, intuitions, and exam warnings, and directly saves them into your course notes!</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Echo360 CLI Alternative */}
+              <div className="p-5 rounded-xl bg-zinc-900/60 border border-zinc-800 space-y-3">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Terminal className="w-4 h-4 text-indigo-400" />
+                  <span>Option B: Terminal CLI (Batch Scripting)</span>
+                </h3>
+                <p className="text-xs text-zinc-300 leading-relaxed">
+                  If you prefer batch scripting from your command line:
+                </p>
+                <div className="space-y-2 text-xs">
+                  <div className="p-2.5 rounded-lg bg-zinc-950 font-mono text-[11px] text-zinc-300 border border-zinc-800">
+                    <div className="text-zinc-500"># 1. Authenticate once via Chrome SSO</div>
+                    <div>python scripts/echo360_helper.py --login</div>
+                    <div className="text-zinc-500 mt-1"># 2. Batch download all lectures in course section</div>
+                    <div className="text-emerald-400">python scripts/echo360_helper.py --course &lt;CODE&gt; --url &quot;&lt;SECTION_URL&gt;&quot; --all --audio</div>
+                  </div>
+                  <p className="text-[11px] text-zinc-400">
+                    Transcripts land in <code className="text-zinc-300">courses/&lt;CODE&gt;/raw_files/transcripts/</code> and audio streams land in <code className="text-zinc-300">courses/&lt;CODE&gt;/raw_files/audio/</code>.
+                  </p>
+                </div>
+              </div>
+
+              {/* Local Audio Streaming */}
+              <div className="p-5 rounded-xl bg-zinc-900/60 border border-zinc-800 space-y-3">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Volume2 className="w-4 h-4 text-violet-400" />
+                  <span>Option C: Local Audio HTTP 206 Streaming</span>
+                </h3>
+                <p className="text-xs text-zinc-300 leading-relaxed">
+                  Have an existing recording file (<code className="text-zinc-200">.m4a</code> or <code className="text-zinc-200">.mp3</code>)? Place it in:
+                </p>
+                <div className="p-2.5 rounded-lg bg-zinc-950 font-mono text-[11px] text-violet-300 border border-zinc-800">
+                  courses/&lt;COURSE_CODE&gt;/raw_files/audio/&lt;recording_name&gt;.m4a
+                </div>
+                <p className="text-xs text-zinc-400 leading-relaxed">
+                  When you add the filename to your lecture note, Course Noting provides instant in-app audio streaming with waveform seeking and timestamp sync!
+                </p>
+              </div>
+
+              {/* Insights Types */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="p-4 rounded-xl bg-zinc-900/60 border border-zinc-800 space-y-2">
+                  <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <span className="text-sm">🎙️</span>
+                    <span>Spoken Intuitions</span>
+                  </h4>
+                  <p className="text-xs text-zinc-400 leading-relaxed">
+                    Captures informal metaphors, mental models, and geometric visualisations lecturers describe out loud that clarify abstract textbook definitions.
                   </p>
                 </div>
 
-                <div className="p-5 rounded-xl bg-zinc-900/60 border border-zinc-800 space-y-3">
-                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                    <span className="text-base">⚠️</span>
+                <div className="p-4 rounded-xl bg-zinc-900/60 border border-zinc-800 space-y-2">
+                  <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <span className="text-sm">⚠️</span>
                     <span>Lecturer Exam Warnings</span>
-                  </h3>
-                  <p className="text-xs text-zinc-300 leading-relaxed">
-                    Whenever a lecturer highlights common student pitfalls (e.g. &ldquo;Don&apos;t forget to verify Cauchy-Riemann continuity before applying the theorem on the final!&rdquo;), it is highlighted in amber directly inside relevant questions.
+                  </h4>
+                  <p className="text-xs text-zinc-400 leading-relaxed">
+                    Surfaces explicit pitfalls and common student errors the lecturer stressed will be penalized on midterms or final exams.
                   </p>
                 </div>
+              </div>
 
-                <div className="p-5 rounded-xl bg-zinc-900/60 border border-zinc-800 space-y-3">
-                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                    <Layers className="w-4 h-4 text-violet-400" />
-                    <span>Global Toggle [🎙️ Lectures ON / OFF]</span>
-                  </h3>
-                  <p className="text-xs text-zinc-300 leading-relaxed">
-                    Prefer pure textbook theory without lecture overlays? Toggle the button in the top navbar at any time to instantly hide or reveal all Layer 2 callouts across the entire site.
-                  </p>
+              {/* Layer 2 Toggle */}
+              <div className="p-4 rounded-xl bg-violet-950/20 border border-violet-800/30 flex items-center justify-between gap-4">
+                <div className="text-xs text-zinc-300">
+                  <span className="font-bold text-violet-300">Global Toggle [🎙️ Lectures ON / OFF]:</span> Want pure mathematical theory without lecture overlays? Use the top navigation toggle at any time to hide or reveal all Layer 2 callouts across all courses.
                 </div>
               </div>
             </div>

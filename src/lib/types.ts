@@ -11,7 +11,57 @@ export interface CourseMeta {
   logoSymbol?: string;
   description?: string;
   preset?: string;
+  echo360SectionUrl?: string;
+  weeklySyllabus?: Array<{
+    week: number;
+    weekLabel?: string;
+    topic: string;
+    description?: string;
+    dates?: string;
+  }>;
   customSnippets?: MathSnippet[];
+}
+
+export interface UNSWCourseOutline {
+  courseCode: string;
+  courseName: string;
+  year: string;
+  term: string;
+  teachingPeriod?: string;
+  coid?: string;
+  school?: string;
+  faculty?: string;
+  career?: string;
+  unitsOfCredit?: string;
+  uoc?: string;
+  convenorName?: string;
+  coordinatorName?: string;
+  courseSummary?: string;
+  courseAims?: string;
+  handbookLink?: string;
+  timetableLink?: string;
+  deliveryMode?: string;
+  deliveryFormat?: string;
+  schedule: Array<{
+    week: number;
+    weekLabel: string;
+    type: string; // "Lecture" | "Tutorial" | "Assessment"
+    topic: string;
+    description: string;
+    dateRange?: string;
+  }>;
+  assessments: Array<{
+    title: string;
+    type?: string;
+    weight?: string;
+    dueDate?: string;
+    description?: string;
+  }>;
+  learningOutcomes: Array<{
+    code: string;
+    description: string;
+  }>;
+  lastUpdated?: string;
 }
 
 export interface QuestionMeta {
@@ -112,8 +162,11 @@ export type AIProvider = "gemini" | "openai" | "anthropic" | "ollama";
 export interface AISettings {
   provider: AIProvider;
   geminiKey?: string;
+  geminiModel?: string;
   openaiKey?: string;
+  openaiModel?: string;
   anthropicKey?: string;
+  anthropicModel?: string;
   ollamaUrl?: string;
   ollamaModel?: string;
 }

@@ -298,8 +298,10 @@ def bundle_course(parent_dir, course_folder):
 
 def main():
     is_ci = os.environ.get("GITHUB_ACTIONS") == "true" or os.environ.get("NEXT_PUBLIC_DEMO_ONLY") == "true" or "--demo-only" in sys.argv
-    catalog = []
-    seen_ids = set()
+    public_catalog = []
+    local_catalog = []
+    seen_public = set()
+    seen_local = set()
 
     # 1. Process courses.example if it exists (always available as safe demo)
     if os.path.exists(COURSES_EXAMPLE_DIR):
@@ -307,26 +309,38 @@ def main():
             cdir = os.path.join(COURSES_EXAMPLE_DIR, folder)
             if os.path.isdir(cdir):
                 item = bundle_course(COURSES_EXAMPLE_DIR, folder)
-                if item and item["id"] not in seen_ids:
-                    catalog.append(item)
-                    seen_ids.add(item["id"])
+                if item:
+                    if item["id"] not in seen_public:
+                        public_catalog.append(item)
+                        seen_public.add(item["id"])
+                    if item["id"] not in seen_local:
+                        local_catalog.append(item)
+                        seen_local.add(item["id"])
 
-    # 2. If not running in CI or demo-only, process local courses/ directory
+    # 2. Process local courses/ directory (saved ONLY to local_catalog and catalog.local.json)
     if not is_ci and os.path.exists(COURSES_DIR):
         for folder in sorted(os.listdir(COURSES_DIR)):
             cdir = os.path.join(COURSES_DIR, folder)
             if os.path.isdir(cdir):
                 item = bundle_course(COURSES_DIR, folder)
-                if item and item["id"] not in seen_ids:
-                    catalog.append(item)
-                    seen_ids.add(item["id"])
+                if item and item["id"] not in seen_local:
+                    local_catalog.append(item)
+                    seen_local.add(item["id"])
 
     os.makedirs(PUBLIC_DATA_DIR, exist_ok=True)
+
+    # Public catalog: Strictly demo courses, tracked in Git
     catalog_file = os.path.join(PUBLIC_DATA_DIR, "catalog.json")
     with open(catalog_file, "w", encoding="utf-8") as f:
-        json.dump(catalog, f, indent=2)
+        json.dump(public_catalog, f, indent=2)
 
-    print(f"\nSuccessfully generated catalog manifest ({len(catalog)} courses) at {catalog_file}")
+    # Local catalog: All courses (demo + local university), ignored by Git (.gitignore)
+    local_catalog_file = os.path.join(PUBLIC_DATA_DIR, "catalog.local.json")
+    with open(local_catalog_file, "w", encoding="utf-8") as f:
+        json.dump(local_catalog, f, indent=2)
+
+    print(f"\n[OK] Public Catalog (Git Tracked): {len(public_catalog)} demo course(s) at {catalog_file}")
+    print(f"[OK] Local Catalog (.gitignore Protected): {len(local_catalog)} course(s) at {local_catalog_file}")
 
 if __name__ == "__main__":
     main()
