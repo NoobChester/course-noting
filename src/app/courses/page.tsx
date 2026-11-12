@@ -15,7 +15,9 @@ import {
   Wand2,
   Terminal,
   Globe,
-  Upload
+  Upload,
+  Trash2,
+  AlertTriangle
 } from "lucide-react";
 import {
   getCourseCatalog,
@@ -24,14 +26,15 @@ import {
   setActiveCourseId as setStoredActiveCourseId,
   getActiveCourseId,
   importCustomPack,
-  getBasePath
+  getBasePath,
+  deleteCourse
 } from "@/lib/pack-loader";
 
 export default function CoursesPage() {
   const router = useRouter();
   const [courses, setCourses] = useState<CourseMeta[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeCourseId, setActiveCourseId] = useState("sample1001");
+  const [activeCourseId, setActiveCourseId] = useState("");
   const [isLocal, setIsLocal] = useState(false);
 
   // Creation Wizard Form
@@ -44,6 +47,38 @@ export default function CoursesPage() {
   const [pasteQuestions, setPasteQuestions] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [successBanner, setSuccessBanner] = useState("");
+
+  // Deletion State
+  const [courseToDelete, setCourseToDelete] = useState<CourseMeta | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+
+  const handleConfirmDelete = async () => {
+    if (!courseToDelete) return;
+    setIsDeleting(true);
+    setDeleteError("");
+    try {
+      const res = await deleteCourse(courseToDelete.id);
+      if (!res.success) {
+        setDeleteError(res.error || "Failed to delete course");
+        setIsDeleting(false);
+        return;
+      }
+
+      setCourses((prev) => prev.filter((c) => c.id.toLowerCase() !== courseToDelete.id.toLowerCase()));
+      if (activeCourseId.toLowerCase() === courseToDelete.id.toLowerCase()) {
+        setActiveCourseId("sample1001");
+        setStoredActiveCourseId("sample1001");
+      }
+      setSuccessBanner(`✓ Course ${courseToDelete.code} has been successfully deleted.`);
+      setTimeout(() => setSuccessBanner(""), 5000);
+      setCourseToDelete(null);
+    } catch (err: any) {
+      setDeleteError(err.message || "Failed to delete course");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   useEffect(() => {
     setIsLocal(isLocalStudio());
@@ -207,6 +242,19 @@ export default function CoursesPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
+          <Link
+            href="/lectures?addCourse=true"
+            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-bold transition flex items-center gap-2 shadow-lg shadow-indigo-600/30 cursor-pointer self-start sm:self-auto"
+          >
+            <Sparkles className="w-4 h-4 text-violet-200" />
+            <span>+ Add Course (Auto-Discover)</span>
+          </Link>
+          <Link
+            href="/courses/setup"
+            className="px-3.5 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-bold transition flex items-center gap-2 border border-zinc-700 cursor-pointer shadow-sm"
+          >
+            <span>Turnkey Setup Wizard</span>
+          </Link>
           <label className="px-3.5 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-bold transition flex items-center gap-2 border border-zinc-700 cursor-pointer shadow-sm">
             <Upload className="w-4 h-4 text-violet-400" />
             <span>Import Pack (.json)</span>
@@ -215,10 +263,9 @@ export default function CoursesPage() {
           <button
             type="button"
             onClick={() => setShowWizard(!showWizard)}
-            className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition flex items-center gap-2 shadow-lg shadow-indigo-600/30 cursor-pointer self-start sm:self-auto"
+            className="px-3 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 text-xs font-semibold transition border border-zinc-800 cursor-pointer"
           >
-            <Plus className="w-4 h-4" />
-            <span>{showWizard ? "Close Wizard" : "Create New Course Hub"}</span>
+            <span>{showWizard ? "Close Form" : "Manual Form"}</span>
           </button>
         </div>
       </div>
@@ -390,6 +437,20 @@ export default function CoursesPage() {
                         <div className="text-xs text-zinc-400">{c.term} • {c.institution}</div>
                       </div>
                     </div>
+
+                    {c.id.toLowerCase() !== "sample1001" && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDeleteError("");
+                          setCourseToDelete(c);
+                        }}
+                        className="p-1.5 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition cursor-pointer"
+                        title={`Delete course ${c.code}`}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
 
                   <h4 className="text-lg font-bold text-zinc-100 mb-2">{c.name}</h4>
@@ -399,7 +460,15 @@ export default function CoursesPage() {
                 </div>
 
                 <div className="pt-5 border-t border-zinc-800/80 flex items-center justify-between mt-4">
-                  <span className="text-xs text-zinc-500 font-medium">Preset: {c.preset || "general"}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-zinc-500 font-medium">Preset: {c.preset || "general"}</span>
+                    <Link
+                      href={`/courses/${c.id}/manage`}
+                      className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold"
+                    >
+                      • Manage Timeline
+                    </Link>
+                  </div>
 
                   {isActive ? (
                     <Link
@@ -422,6 +491,57 @@ export default function CoursesPage() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Delete Course Confirmation Modal */}
+      {courseToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="w-full max-w-md p-6 rounded-2xl bg-zinc-900 border border-red-500/50 shadow-2xl space-y-5">
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-base font-bold text-white">
+                  Delete {courseToDelete.code}?
+                </h3>
+                <p className="text-xs text-zinc-400 leading-relaxed">
+                  Are you sure you want to permanently delete <strong className="text-zinc-200">{courseToDelete.name}</strong> ({courseToDelete.code})?
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 rounded-xl bg-red-950/30 border border-red-900/40 text-[11px] text-red-300/90 leading-relaxed">
+              ⚠️ This will permanently remove all associated problem sheets, lecture recordings, notes, and questions for this course. This action cannot be undone.
+            </div>
+
+            {deleteError && (
+              <div className="p-2.5 rounded-lg bg-red-950/80 border border-red-800 text-xs text-red-300 font-semibold">
+                {deleteError}
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setCourseToDelete(null)}
+                className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-semibold transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={handleConfirmDelete}
+                className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-lg shadow-red-950/50 cursor-pointer disabled:opacity-50"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isDeleting ? "Deleting..." : "Permanently Delete Course"}</span>
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

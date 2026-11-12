@@ -58,6 +58,45 @@ export function saveCustomCourse(meta: CourseMeta, basePack: CourseBasePack) {
   setActiveCourseId(courseId);
 }
 
+/** Delete a course both from localStorage and filesystem (Local Studio) */
+export async function deleteCourse(courseId: string): Promise<{ success: boolean; error?: string }> {
+  const cleanId = courseId.toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (cleanId === "sample1001") {
+    return { success: false, error: "The default demo course (SAMPLE1001) is protected and cannot be deleted." };
+  }
+
+  // 1. Clean localStorage custom packs
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.removeItem(`${STORAGE_CUSTOM_PACKS_PREFIX}${cleanId}_base`);
+      localStorage.removeItem(`${STORAGE_CUSTOM_PACKS_PREFIX}${cleanId}_lectures`);
+      const existing = getCustomCourseList().filter((c) => c.id.toLowerCase() !== cleanId);
+      localStorage.setItem(STORAGE_CUSTOM_COURSES_LIST, JSON.stringify(existing));
+
+      if (getActiveCourseId().toLowerCase() === cleanId) {
+        setActiveCourseId("sample1001");
+      }
+    } catch {}
+  }
+
+  // 2. Local Studio API call
+  if (isLocalStudio()) {
+    try {
+      const res = await fetch(`/api/courses?course=${encodeURIComponent(cleanId)}`, {
+        method: "DELETE"
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        return { success: false, error: data.error || "Failed to delete course from server" };
+      }
+    } catch (err: any) {
+      return { success: false, error: err.message || "Network error deleting course" };
+    }
+  }
+
+  return { success: true };
+}
+
 /** Append or update a single question in a custom course's base pack in localStorage */
 export function saveQuestionToCustomCourse(courseId: string, question: Question) {
   if (typeof window === "undefined") return;
@@ -198,8 +237,8 @@ export async function getCourseCatalog(): Promise<CourseCatalogItem[]> {
 
 /** Get the currently selected course ID */
 export function getActiveCourseId(): string {
-  if (typeof window === "undefined") return "sample1001";
-  return localStorage.getItem(STORAGE_ACTIVE_COURSE) || "sample1001";
+  if (typeof window === "undefined") return "";
+  return localStorage.getItem(STORAGE_ACTIVE_COURSE) || "";
 }
 
 /** Set the active course ID */
