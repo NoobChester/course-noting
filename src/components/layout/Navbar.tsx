@@ -32,12 +32,7 @@ import { SettingsModal } from "./SettingsModal";
 export function Navbar() {
   const pathname = usePathname();
   const [courses, setCourses] = useState<CourseMeta[]>([]);
-  const [activeCourse, setActiveCourse] = useState<CourseMeta>({
-    id: "sample1001",
-    code: "SAMPLE1001",
-    name: "Linear Algebra & Multivariable Calculus",
-    logoSymbol: "λ"
-  });
+  const [activeCourse, setActiveCourse] = useState<CourseMeta | null>(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
@@ -65,7 +60,7 @@ export function Navbar() {
   };
 
   useEffect(() => {
-    const savedCourseId = localStorage.getItem("math_active_course") || "sample1001";
+    const savedCourseId = localStorage.getItem("math_active_course") || "";
 
     getCourseCatalog().then((catalog) => {
       if (catalog && catalog.length > 0) {
@@ -77,14 +72,18 @@ export function Navbar() {
           description: c.description
         }));
         setCourses(courseList);
-        const current = courseList.find((c) => c.id.toLowerCase() === savedCourseId.toLowerCase()) || courseList[0];
-        if (current) setActiveCourse(current);
+        const current = savedCourseId ? (courseList.find((c) => c.id.toLowerCase() === savedCourseId.toLowerCase()) || null) : null;
+        setActiveCourse(current);
       }
     }).catch(() => {});
   }, []);
 
   useEffect(() => {
-    const savedCourseId = localStorage.getItem("math_active_course") || "sample1001";
+    const savedCourseId = localStorage.getItem("math_active_course");
+    if (!savedCourseId) {
+      setStats({ total: 0, mastered: 0, review: 0, dueToday: 0 });
+      return;
+    }
 
     fetch(`/api/questions?course=${savedCourseId}`)
       .then((res) => {
@@ -153,16 +152,18 @@ export function Navbar() {
             onClick={() => setIsDropdownOpen(!isDropdownOpen)}
             className="flex items-center gap-2.5 p-1 rounded-xl hover:bg-zinc-900 transition text-left cursor-pointer group"
           >
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 text-white flex items-center justify-center font-bold font-mono text-xs shadow-md group-hover:scale-105 transition">
-              {activeCourse.logoSymbol || "📚"}
+            <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold font-mono text-xs shadow-md group-hover:scale-105 transition ${
+              activeCourse ? "bg-gradient-to-tr from-indigo-600 to-violet-500 text-white" : "bg-zinc-800 text-zinc-400 border border-zinc-700"
+            }`}>
+              {activeCourse?.logoSymbol || "📚"}
             </div>
             <div>
               <div className="text-sm font-black tracking-tight text-zinc-100 flex items-center gap-1.5">
-                <span>{activeCourse.code}</span>
+                <span>{activeCourse ? activeCourse.code : "Select Course"}</span>
                 <ChevronDown className="w-3.5 h-3.5 text-zinc-500 group-hover:text-zinc-200 transition" />
               </div>
               <div className="text-[10px] text-zinc-400 font-medium line-clamp-1 max-w-[140px] sm:max-w-none">
-                {activeCourse.name}
+                {activeCourse ? activeCourse.name : "No active course"}
               </div>
             </div>
           </button>
@@ -171,37 +172,48 @@ export function Navbar() {
           {isDropdownOpen && (
             <div className="absolute left-0 mt-2 w-72 rounded-2xl bg-zinc-900 border border-zinc-800 shadow-2xl p-2 z-50 animate-in fade-in duration-150">
               <div className="px-3 py-1.5 text-[10px] uppercase font-bold text-zinc-500 tracking-wider">
-                Switch Course Hub
+                Active Course Hub
               </div>
               <div className="space-y-1">
-                {courses.map((c) => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    onClick={() => switchCourse(c)}
-                    className={`w-full text-left p-2.5 rounded-xl flex items-center gap-2.5 text-xs transition cursor-pointer ${
-                      c.id === activeCourse.id
-                        ? "bg-indigo-600 text-white font-bold"
-                        : "text-zinc-300 hover:bg-zinc-800"
-                    }`}
-                  >
-                    <span className="font-mono">{c.logoSymbol || "📚"}</span>
-                    <div>
-                      <div className="font-bold">{c.code}</div>
-                      <div className="text-[10px] opacity-80 line-clamp-1">{c.name}</div>
-                    </div>
-                  </button>
-                ))}
+                {courses.length === 0 ? (
+                  <div className="px-3 py-2 text-xs text-zinc-500 italic">No courses added yet</div>
+                ) : (
+                  courses.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => switchCourse(c)}
+                      className={`w-full text-left p-2.5 rounded-xl flex items-center gap-2.5 text-xs transition cursor-pointer ${
+                        activeCourse && c.id === activeCourse.id
+                          ? "bg-indigo-600 text-white font-bold"
+                          : "text-zinc-300 hover:bg-zinc-800"
+                      }`}
+                    >
+                      <span className="font-mono">{c.logoSymbol || "📚"}</span>
+                      <div>
+                        <div className="font-bold">{c.code}</div>
+                        <div className="text-[10px] opacity-80 line-clamp-1">{c.name}</div>
+                      </div>
+                    </button>
+                  ))
+                )}
               </div>
 
-              <div className="pt-2 mt-2 border-t border-zinc-800">
+              <div className="pt-2 mt-2 border-t border-zinc-800 space-y-1">
+                <Link
+                  href="/lectures?addCourse=true"
+                  onClick={() => setIsDropdownOpen(false)}
+                  className="w-full p-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition shadow-sm"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>+ Add New Course (Auto-Discover)</span>
+                </Link>
                 <Link
                   href="/courses"
                   onClick={() => setIsDropdownOpen(false)}
-                  className="w-full p-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold flex items-center justify-center gap-1.5 transition"
+                  className="w-full p-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition"
                 >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Manage / Add Courses</span>
+                  <span>Manage All Courses</span>
                 </Link>
               </div>
             </div>
@@ -337,15 +349,17 @@ export function Navbar() {
               {/* Top Drawer Header */}
               <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
                 <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 text-white flex items-center justify-center font-bold font-mono text-xs shadow-md">
-                    {activeCourse.logoSymbol || "📚"}
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold font-mono text-xs shadow-md ${
+                    activeCourse ? "bg-gradient-to-tr from-indigo-600 to-violet-500 text-white" : "bg-zinc-800 text-zinc-400 border border-zinc-700"
+                  }`}>
+                    {activeCourse?.logoSymbol || "📚"}
                   </div>
                   <div>
                     <div className="text-sm font-black text-white flex items-center gap-1.5">
-                      {activeCourse.code}
+                      {activeCourse ? activeCourse.code : "Select Course"}
                     </div>
                     <div className="text-[10px] text-zinc-400 truncate max-w-[140px]">
-                      {activeCourse.name}
+                      {activeCourse ? activeCourse.name : "No active course"}
                     </div>
                   </div>
                 </div>

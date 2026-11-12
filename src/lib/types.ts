@@ -75,6 +75,8 @@ export interface QuestionMeta {
   isNonExaminable?: boolean; // † marked in problem sheet
   status: QuestionStatus;
   concepts: string[];
+  chapter?: number;
+  chapterPdfPage?: number;
   source?: string;
   snipUrl?: string;
   starred?: boolean;
@@ -157,7 +159,7 @@ export interface FullBackupPayload {
   courses: Record<string, CourseUserState>;
 }
 
-export type AIProvider = "gemini" | "openai" | "anthropic" | "ollama";
+export type AIProvider = "antigravity" | "gemini" | "openai" | "anthropic" | "ollama";
 
 export interface AISettings {
   provider: AIProvider;

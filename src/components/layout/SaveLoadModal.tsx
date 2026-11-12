@@ -48,7 +48,7 @@ interface SaveLoadModalProps {
 }
 
 export function SaveLoadModal({ isOpen, onClose }: SaveLoadModalProps) {
-  const [activeTab, setActiveTab] = useState<"selective" | "save" | "load" | "reset">("selective");
+  const [activeTab, setActiveTab] = useState<"selective" | "save" | "load" | "reset" | "cnpack">("selective");
   const [saveString, setSaveString] = useState("");
   const [stats, setStats] = useState<{
     totalCourses: number;
@@ -460,6 +460,44 @@ export function SaveLoadModal({ isOpen, onClose }: SaveLoadModalProps) {
     }
   };
 
+  const handleImportCnpackFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setLoading(true);
+    setStatusMessage(null);
+    try {
+      const text = await file.text();
+      const pack = JSON.parse(text);
+
+      const res = await fetch("/api/courses/pack", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(pack)
+      });
+
+      if (!res.ok) {
+        throw new Error("Failed to unpack course archive");
+      }
+
+      const result = await res.json();
+      setStatusMessage({
+        type: "success",
+        text: `Successfully imported ${result.code}! Unpacked ${result.questionsImported} questions and ${result.latexFilesWritten} raw LaTeX files. Reloading...`
+      });
+
+      setTimeout(() => {
+        window.location.reload();
+      }, 1500);
+    } catch (err: any) {
+      setStatusMessage({
+        type: "error",
+        text: err.message || "Failed to import course pack."
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/75 backdrop-blur-sm animate-in fade-in duration-200 overflow-y-auto">
       <div className="w-full max-w-3xl rounded-2xl bg-zinc-950 border border-zinc-800 shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
@@ -534,6 +572,17 @@ export function SaveLoadModal({ isOpen, onClose }: SaveLoadModalProps) {
           >
             <Trash2 className="w-3.5 h-3.5" />
             <span>Clean Slate</span>
+          </button>
+          <button
+            onClick={() => setActiveTab("cnpack")}
+            className={`flex items-center gap-2 pb-3 px-3 transition border-b-2 cursor-pointer whitespace-nowrap ${
+              activeTab === "cnpack"
+                ? "border-violet-500 text-violet-400"
+                : "border-transparent text-zinc-400 hover:text-zinc-200"
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5 text-violet-400" />
+            <span>Course Pack (.cnpack)</span>
           </button>
         </div>
 
@@ -1239,6 +1288,68 @@ export function SaveLoadModal({ isOpen, onClose }: SaveLoadModalProps) {
                   </>
                 )}
               </button>
+            </div>
+          )}
+
+          {activeTab === "cnpack" && (
+            <div className="space-y-6 animate-in fade-in duration-150">
+              <div className="p-4 rounded-xl bg-violet-950/20 border border-violet-500/30 space-y-2">
+                <div className="flex items-center gap-2 text-violet-300 font-bold text-xs">
+                  <Sparkles className="w-4 h-4 text-violet-400" />
+                  <span>Portable Course Pack (.cnpack) Engine</span>
+                </div>
+                <p className="text-xs text-zinc-300 leading-relaxed">
+                  A <code className="text-violet-300 font-mono">.cnpack</code> archive bundles everything for this course into a single shareable file: the interactive web questions, concept cheat sheets, compiled PDFs, <strong>plus the complete raw LaTeX source workspace</strong> (main.tex, preamble, macros, chapters, and analytical dossiers).
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Export Card */}
+                <div className="p-5 rounded-2xl bg-zinc-900 border border-zinc-800 space-y-4 flex flex-col justify-between">
+                  <div className="space-y-1.5">
+                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                      <Download className="w-4 h-4 text-indigo-400" />
+                      <span>Export Course Pack</span>
+                    </h3>
+                    <p className="text-xs text-zinc-400 leading-relaxed">
+                      Download a single package containing raw LaTeX source files and web study packs to share cleanly with classmates.
+                    </p>
+                  </div>
+
+                  <a
+                    href={`/api/courses/pack?course=${activeCourseId}`}
+                    download={`${activeCourseId}_coursebook.cnpack`}
+                    className="w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-lg shadow-indigo-600/30 text-center"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Download .cnpack Archive</span>
+                  </a>
+                </div>
+
+                {/* Import Card */}
+                <div className="p-5 rounded-2xl bg-zinc-900 border border-zinc-800 space-y-4 flex flex-col justify-between">
+                  <div className="space-y-1.5">
+                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                      <Upload className="w-4 h-4 text-emerald-400" />
+                      <span>Import Course Pack</span>
+                    </h3>
+                    <p className="text-xs text-zinc-400 leading-relaxed">
+                      Load a classmate&apos;s .cnpack file to unpack both the interactive web hub and the local LaTeX textbook source.
+                    </p>
+                  </div>
+
+                  <label className="w-full py-2.5 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-sm text-center">
+                    <Upload className="w-4 h-4 text-emerald-400" />
+                    <span>Select .cnpack File</span>
+                    <input
+                      type="file"
+                      accept=".cnpack,.json"
+                      onChange={handleImportCnpackFile}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+              </div>
             </div>
           )}
         </div>

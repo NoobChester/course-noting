@@ -19,7 +19,7 @@ import {
 import { getActiveCourseId, loadActiveCourseData } from "@/lib/pack-loader";
 
 export default function MockExamPage() {
-  const [courseId, setCourseId] = useState<string>("sample1001");
+  const [courseId, setCourseId] = useState<string>("");
   const [courseMeta, setCourseMeta] = useState<CourseMeta | null>(null);
   const [allQuestions, setAllQuestions] = useState<QuestionMeta[]>([]);
   const [fullQuestionsMap, setFullQuestionsMap] = useState<{ [id: string]: Question }>({});
@@ -40,6 +40,10 @@ export default function MockExamPage() {
 
   useEffect(() => {
     const activeId = getActiveCourseId();
+    if (!activeId) {
+      setLoading(false);
+      return;
+    }
     setCourseId(activeId);
 
     fetch(`/api/questions?course=${activeId}`)

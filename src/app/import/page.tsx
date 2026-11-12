@@ -29,7 +29,7 @@ import {
 export default function ImportPage() {
   const router = useRouter();
   const [isLocal, setIsLocal] = useState(false);
-  const [courseId, setCourseId] = useState("sample1001");
+  const [courseId, setCourseId] = useState("");
   const [courseMeta, setCourseMeta] = useState<CourseMeta | null>(null);
   const [existingQuestions, setExistingQuestions] = useState<QuestionMeta[]>([]);
 
@@ -57,6 +57,7 @@ export default function ImportPage() {
   useEffect(() => {
     setIsLocal(isLocalStudio());
     const active = getActiveCourseId();
+    if (!active) return;
     setCourseId(active);
 
     fetch(`/api/questions?course=${active}`)

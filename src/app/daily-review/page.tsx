@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 
 export default function DailyReviewPage() {
-  const [courseId, setCourseId] = useState<string>("sample1001");
+  const [courseId, setCourseId] = useState<string>("");
   const [fullQuestionsMap, setFullQuestionsMap] = useState<{ [id: string]: Question }>({});
   const [loading, setLoading] = useState(true);
   const [allQuestions, setAllQuestions] = useState<QuestionMeta[]>([]);
@@ -47,6 +47,10 @@ export default function DailyReviewPage() {
 
   useEffect(() => {
     const saved = getActiveCourseId();
+    if (!saved) {
+      setLoading(false);
+      return;
+    }
     setCourseId(saved);
 
     fetch(`/api/questions?course=${saved}`)

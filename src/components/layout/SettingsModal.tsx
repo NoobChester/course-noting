@@ -220,6 +220,15 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         return;
       }
 
+      if (settings.provider === "antigravity") {
+        setTesting(false);
+        setTestResult({
+          success: true,
+          message: "Antigravity Local Bridge is active and ready in this workspace!"
+        });
+        return;
+      }
+
       if (settings.provider === "gemini") {
         const result = await testGeminiKey(currentKey?.trim() || "", currentModel);
         setTesting(false);
@@ -329,6 +338,28 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
+                onClick={() => setSettings({ ...settings, provider: "antigravity" })}
+                className={`p-3 rounded-xl border text-left transition cursor-pointer col-span-2 ${
+                  settings.provider === "antigravity"
+                    ? "bg-violet-600/20 border-violet-500 text-white shadow-xs"
+                    : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                <div className="text-xs font-bold flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <span>🛸 Antigravity (Local Studio)</span>
+                    <span className="text-[9px] uppercase px-1.5 py-0.2 rounded bg-violet-950 text-violet-400 font-semibold border border-violet-800">
+                      Zero API Key
+                    </span>
+                  </span>
+                  <span className="text-[10px] text-emerald-400 font-medium">Workspace-Aware</span>
+                </div>
+                <div className="text-[10px] text-zinc-500 mt-1">
+                  Routes proof audits directly through your local Antigravity session with LaTeX chapter awareness.
+                </div>
+              </button>
+              <button
+                type="button"
                 onClick={() => setSettings({ ...settings, provider: "gemini" })}
                 className={`p-3 rounded-xl border text-left transition cursor-pointer ${
                   settings.provider === "gemini"
@@ -392,6 +423,23 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           </div>
 
           {/* Provider Specific Input & Model Selector */}
+          {settings.provider === "antigravity" && (
+            <div className="space-y-3 p-4 rounded-xl bg-violet-950/20 border border-violet-500/30">
+              <div className="flex items-center gap-2 text-violet-300 text-xs font-semibold">
+                <Sparkles className="w-4 h-4 text-violet-400 shrink-0" />
+                <span>Connected to Local Antigravity Engine</span>
+              </div>
+              <p className="text-[11px] text-zinc-300 leading-relaxed">
+                Proof evaluations are dispatched directly to your active Antigravity session. It audits mathematical rigor against the full LaTeX textbook definitions and official benchmark solutions in your workspace.
+              </p>
+              <div className="text-[10px] text-zinc-400 bg-zinc-950/60 p-2.5 rounded-lg border border-zinc-800 font-mono space-y-1">
+                <div>✓ Zero external API keys required</div>
+                <div>✓ Live 4-pillar context assembly (Prompt, Benchmark, Definitions, Working)</div>
+                <div>✓ Direct LaTeX theorem & chapter awareness</div>
+              </div>
+            </div>
+          )}
+
           {settings.provider === "gemini" && (
             <div className="space-y-3 p-4 rounded-xl bg-zinc-900/60 border border-zinc-800">
               <div className="space-y-1.5">

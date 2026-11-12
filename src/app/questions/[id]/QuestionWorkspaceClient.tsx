@@ -8,6 +8,7 @@ import { MathRenderer } from "@/components/math/MathRenderer";
 import { SplitEditor } from "@/components/math/SplitEditor";
 import { ConceptDrawer } from "@/components/concepts/ConceptDrawer";
 import { ScratchpadCanvas } from "@/components/canvas/ScratchpadCanvas";
+import { EmbeddedPdfViewer } from "@/components/pdf/EmbeddedPdfViewer";
 import { calculateNextSM2, getIntervalPreview, isDueToday } from "@/lib/sm2-service";
 import { loadActiveCourseData, getActiveCourseId, isLocalStudio } from "@/lib/pack-loader";
 import { auditProofWithGemini } from "@/lib/gemini-client";
@@ -56,6 +57,7 @@ export function QuestionWorkspaceClient({ id }: { id: string }) {
   const [hintsText, setHintsText] = useState("");
   const [canvasData, setCanvasData] = useState<string | undefined>(undefined);
   const [isScratchpadOpen, setIsScratchpadOpen] = useState(false);
+  const [isPdfViewerOpen, setIsPdfViewerOpen] = useState(false);
 
   // AI Proof Review State
   const [isReviewing, setIsReviewing] = useState(false);
@@ -70,27 +72,30 @@ export function QuestionWorkspaceClient({ id }: { id: string }) {
   const isInitialLoad = useRef(true);
 
   useEffect(() => {
-    const courseId = localStorage.getItem("math_active_course") || "sample1001";
-    fetch(`/api/questions?course=${courseId}`, { cache: "no-store" })
-      .then((res) => {
-        if (!res.ok) throw new Error("API not available");
-        return res.json();
-      })
-      .then((data: { id: string }[]) => {
-        if (Array.isArray(data)) {
-          setAllQuestionIds(data.map((q) => q.id));
-        }
-      })
-      .catch(async () => {
-        const merged = await loadActiveCourseData();
-        if (merged?.questions) {
-          setAllQuestionIds(merged.questions.map((q) => q.id));
-        }
-      });
+    const courseId = localStorage.getItem("math_active_course") || "";
+    if (courseId) {
+      fetch(`/api/questions?course=${courseId}`, { cache: "no-store" })
+        .then((res) => {
+          if (!res.ok) throw new Error("API not available");
+          return res.json();
+        })
+        .then((data: { id: string }[]) => {
+          if (Array.isArray(data)) {
+            setAllQuestionIds(data.map((q) => q.id));
+          }
+        })
+        .catch(async () => {
+          const merged = await loadActiveCourseData();
+          if (merged?.questions) {
+            setAllQuestionIds(merged.questions.map((q) => q.id));
+          }
+        });
+    }
   }, []);
 
   useEffect(() => {
-    const courseId = localStorage.getItem("math_active_course") || "sample1001";
+    const courseId = localStorage.getItem("math_active_course") || "";
+    if (!courseId) return;
     fetch(`/api/questions/${id}?course=${courseId}`, { cache: "no-store" })
       .then((res) => {
         if (!res.ok) throw new Error("Not found");
@@ -641,6 +646,21 @@ export function QuestionWorkspaceClient({ id }: { id: string }) {
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Toggle Textbook PDF Button */}
+            <button
+              type="button"
+              onClick={() => setIsPdfViewerOpen(!isPdfViewerOpen)}
+              className={`px-3 py-1.5 rounded-lg border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer ${
+                isPdfViewerOpen
+                  ? "bg-indigo-600 text-white border-indigo-500 shadow-sm"
+                  : "bg-zinc-900 border-zinc-800 text-zinc-300 hover:bg-zinc-800"
+              }`}
+              title="Toggle typeset textbook PDF reader side-by-side"
+            >
+              <BookOpen className="w-3.5 h-3.5 text-indigo-400" />
+              <span>{isPdfViewerOpen ? "Hide PDF" : "📖 Textbook PDF"}</span>
+            </button>
+
             {/* Toggle Scratchpad Button */}
             <button
               type="button"
@@ -673,6 +693,16 @@ export function QuestionWorkspaceClient({ id }: { id: string }) {
             </button>
           </div>
         </div>
+
+        {/* Embedded Side-by-Side PDF Viewer */}
+        {isPdfViewerOpen && (
+          <EmbeddedPdfViewer
+            courseId={getActiveCourseId()}
+            chapter={question?.chapter || question?.week || 1}
+            chapterPdfPage={question?.chapterPdfPage || 1}
+            onClose={() => setIsPdfViewerOpen(false)}
+          />
+        )}
 
         {/* Scratchpad Canvas Drawer */}
         {isScratchpadOpen && (

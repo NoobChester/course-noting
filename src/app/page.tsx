@@ -23,30 +23,39 @@ import { loadActiveCourseData, setActiveCourseId, getCourseCatalog } from "@/lib
 export default function DashboardPage() {
   const [questions, setQuestions] = useState<QuestionMeta[]>([]);
   const [concepts, setConcepts] = useState<Concept[]>([]);
-  const [courseInfo, setCourseInfo] = useState({
-    code: COURSE_CONFIG.code,
-    name: COURSE_CONFIG.name,
-    description: COURSE_CONFIG.description,
-    id: "sample1001"
-  });
+  const [availableCourses, setAvailableCourses] = useState<any[]>([]);
+  const [courseInfo, setCourseInfo] = useState<{
+    code: string;
+    name: string;
+    description: string;
+    id: string;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const courseId = localStorage.getItem("math_active_course") || "sample1001";
+    const courseId = localStorage.getItem("math_active_course") || "";
 
     getCourseCatalog()
       .then((catalog) => {
-        const current = catalog.find((c) => c.id.toLowerCase() === courseId.toLowerCase());
-        if (current) {
-          setCourseInfo({
-            code: current.code,
-            name: current.name,
-            description: current.description || "",
-            id: current.id
-          });
+        setAvailableCourses(catalog);
+        if (courseId) {
+          const current = catalog.find((c) => c.id.toLowerCase() === courseId.toLowerCase());
+          if (current) {
+            setCourseInfo({
+              code: current.code,
+              name: current.name,
+              description: current.description || "",
+              id: current.id
+            });
+          }
         }
       })
       .catch(() => {});
+
+    if (!courseId) {
+      setLoading(false);
+      return;
+    }
 
     Promise.all([
       fetch(`/api/questions?course=${courseId}`, { cache: "no-store" }).then((res) => {
@@ -66,8 +75,8 @@ export default function DashboardPage() {
         const merged = await loadActiveCourseData();
         if (merged) {
           setCourseInfo({
-            code: merged.course.code || "SAMPLE1001",
-            name: merged.course.name || "Demo Course",
+            code: merged.course.code || "",
+            name: merged.course.name || "",
             description: merged.course.description || "",
             id: merged.course.id
           });
@@ -77,6 +86,11 @@ export default function DashboardPage() {
       })
       .finally(() => setLoading(false));
   }, []);
+
+  const handleSelectCourse = (courseId: string) => {
+    localStorage.setItem("math_active_course", courseId.toLowerCase());
+    window.location.reload();
+  };
 
   const total = questions.length;
   const mastered = questions.filter((q) => q.status === "Mastered").length;
@@ -103,6 +117,99 @@ export default function DashboardPage() {
     questions.find((q) => q.status === "Needs Review") ||
     questions.find((q) => q.status === "Unattempted") ||
     questions[0];
+
+  if (!loading && !courseInfo) {
+    return (
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-16 space-y-10">
+        <div className="text-center space-y-3">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-violet-500/10 text-violet-400 text-xs font-semibold border border-violet-500/20">
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Antigravity Course Noting Platform</span>
+          </div>
+          <h1 className="text-3xl sm:text-5xl font-black text-white tracking-tight">
+            Welcome to Course Noting Hub
+          </h1>
+          <p className="text-sm sm:text-base text-zinc-400 max-w-xl mx-auto">
+            Choose an existing course below to start practicing proofs, or auto-discover a new course using your course outline or Echo360 section URL.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Card 1: Add New Course via Auto-Discovery */}
+          <Link
+            href="/lectures?addCourse=true"
+            className="p-6 rounded-2xl bg-gradient-to-br from-violet-950/40 via-zinc-900/90 to-zinc-950 border border-violet-800/40 hover:border-violet-500/70 shadow-xl transition group flex flex-col justify-between cursor-pointer"
+          >
+            <div className="space-y-3">
+              <div className="w-12 h-12 rounded-xl bg-violet-600/20 border border-violet-500/30 text-violet-300 flex items-center justify-center font-bold text-xl group-hover:scale-105 transition">
+                ⚡
+              </div>
+              <h2 className="text-xl font-bold text-white group-hover:text-violet-300 transition">
+                + Add Course (Auto-Discover)
+              </h2>
+              <p className="text-xs text-zinc-400 leading-relaxed">
+                Enter your course code (e.g. <strong>MATH3701</strong>) or paste your Echo360 Section URL. The hub automatically discovers the title, term, lecture schedule, and recordings — zero manual typing.
+              </p>
+            </div>
+            <div className="pt-6 flex items-center gap-2 text-xs font-bold text-violet-400 group-hover:text-violet-300">
+              <span>Launch Ingestion Wizard</span>
+              <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition" />
+            </div>
+          </Link>
+
+          {/* Card 2: Select Existing Course */}
+          <div className="p-6 rounded-2xl bg-zinc-900/70 border border-zinc-800 shadow-xl flex flex-col justify-between space-y-4">
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-zinc-400">
+                <BookOpen className="w-4 h-4 text-indigo-400" />
+                <span>Existing Course Hubs</span>
+              </div>
+              <h2 className="text-xl font-bold text-white">Select Active Course</h2>
+              <p className="text-xs text-zinc-400">
+                Switch to any initialized course in your workspace to load practice problems and review schedules.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              {availableCourses.length === 0 ? (
+                <div className="p-4 rounded-xl bg-zinc-950/50 border border-zinc-800/80 text-xs text-zinc-500 text-center italic">
+                  No courses found in workspace
+                </div>
+              ) : (
+                availableCourses.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => handleSelectCourse(c.id)}
+                    className="w-full text-left p-3 rounded-xl bg-zinc-950/80 hover:bg-zinc-800/80 border border-zinc-800 hover:border-zinc-700 transition flex items-center justify-between cursor-pointer group"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <span className="font-mono text-sm">{c.logoSymbol || "📚"}</span>
+                      <div>
+                        <div className="text-xs font-bold text-zinc-200 group-hover:text-white">{c.code}</div>
+                        <div className="text-[10px] text-zinc-400 line-clamp-1">{c.name}</div>
+                      </div>
+                    </div>
+                    <span className="text-[11px] font-semibold text-indigo-400 group-hover:translate-x-0.5 transition">
+                      Activate →
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!courseInfo) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 py-16 text-center text-zinc-500">
+        Loading course hub...
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
