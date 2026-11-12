@@ -46,7 +46,11 @@ import {
   Trash2,
   FileUp,
   Settings,
-  ListOrdered
+  ListOrdered,
+  AlertOctagon,
+  Save,
+  Zap,
+  FolderLock
 } from "lucide-react";
 import { SettingsModal } from "@/components/layout/SettingsModal";
 import { useBackgroundIngest, IngestLectureItem } from "@/context/BackgroundIngestContext";
@@ -59,6 +63,7 @@ import {
   getCourseCatalog,
   CourseCatalogItem
 } from "@/lib/pack-loader";
+import JSZip from "jszip";
 
 export default function LecturesPage() {
   const {
@@ -69,7 +74,7 @@ export default function LecturesPage() {
     subscribeToNoteUpdates
   } = useBackgroundIngest();
 
-  const [courseId, setCourseId] = useState<string>("sample1001");
+  const [courseId, setCourseId] = useState<string>("");
   const [availableCourses, setAvailableCourses] = useState<CourseCatalogItem[]>([]);
   const [lectures, setLectures] = useState<LectureNote[]>([]);
   const [selectedLecture, setSelectedLecture] = useState<LectureNote | null>(null);
@@ -101,10 +106,34 @@ export default function LecturesPage() {
   const [extracting, setExtracting] = useState(false);
 
   // Echo360 GUI Auto-Pull state
-  const [echoSessionStatus, setEchoSessionStatus] = useState<{ hasSession: boolean; cookieCount: number; lastUpdated?: string | null } | null>(null);
+  const [echoSessionStatus, setEchoSessionStatus] = useState<{
+    hasSession: boolean;
+    cookieCount: number;
+    lastUpdated?: string | null;
+    courseCode?: string | null;
+    courseTitle?: string | null;
+    term?: string | null;
+    sectionId?: string | null;
+    sectionUrl?: string | null;
+    userEmail?: string | null;
+  } | null>(null);
   const [echoSessionChecking, setEchoSessionChecking] = useState(false);
   const [showSessionSetup, setShowSessionSetup] = useState(false);
   const [pastedCookieString, setPastedCookieString] = useState("");
+  const [persistCookieToDisk, setPersistCookieToDisk] = useState(false);
+  const [vaultSessions, setVaultSessions] = useState<Array<{
+    id: string;
+    courseCode: string;
+    courseTitle: string;
+    term?: string | null;
+    sectionId?: string | null;
+    sectionUrl?: string | null;
+    userEmail?: string | null;
+    savedAt: string;
+    cookieHeader: string;
+    rawInput?: string;
+  }>>([]);
+  const [vaultDropdownOpen, setVaultDropdownOpen] = useState(false);
   const [savingSession, setSavingSession] = useState(false);
   const [autoPulling, setAutoPulling] = useState(false);
   const [autoPullProgress, setAutoPullProgress] = useState<string>("");
@@ -261,17 +290,26 @@ export default function LecturesPage() {
   const [courseOutline, setCourseOutline] = useState<UNSWCourseOutline | null>(null);
   const [detectedYear, setDetectedYear] = useState<number>(2026);
   const [detectedTerm, setDetectedTerm] = useState<string>("Term 1");
-  const [availableYears, setAvailableYears] = useState<string[]>(["2026", "2025", "2024", "2023"]);
+  const [availableYears, setAvailableYears] = useState<string[]>([]);
+  const [availableTerms, setAvailableTerms] = useState<string[]>([]);
   const [isClosestMatch, setIsClosestMatch] = useState<boolean>(false);
   const [closestYear, setClosestYear] = useState<string | undefined>(undefined);
   const [needsSectionUrl, setNeedsSectionUrl] = useState<boolean>(false);
   const [loadingOutline, setLoadingOutline] = useState<boolean>(false);
+  const [isCreatingCourse, setIsCreatingCourse] = useState<boolean>(false);
+  const [createdCourseSuccess, setCreatedCourseSuccess] = useState<string | null>(null);
 
   // Audio player state
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState("00:00:00");
 
   const loadCourseData = (targetCourse: string) => {
+    if (!targetCourse) {
+      setLectures([]);
+      setSelectedLecture(null);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     fetch(`/api/lectures?course=${targetCourse}`)
       .then((res) => {
@@ -354,7 +392,12 @@ export default function LecturesPage() {
   useEffect(() => {
     setIsLocal(isLocalStudio());
     const savedCourse = getActiveCourseId();
-    setCourseId(savedCourse);
+    if (savedCourse) {
+      setCourseId(savedCourse);
+      loadCourseData(savedCourse);
+    } else {
+      setLoading(false);
+    }
 
     getCourseCatalog()
       .then((catalog) => {
@@ -362,9 +405,31 @@ export default function LecturesPage() {
       })
       .catch(() => {});
 
-    loadCourseData(savedCourse);
-    checkEchoSession();
+    checkEchoSession(true);
+
+    // Auto-discover the course from the connected cookie when ingest modal opens
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("addCourse") === "true" || params.get("openIngest") === "true") {
+        setIngestModalOpen(true);
+        setCourseOutline(null);
+        setSectionUrl("");
+        setDiscoveredLectures([]);
+        setAutoPullError(null);
+      }
+    }
   }, []);
+
+  // Automatically trigger outline & lectures discovery for the connected cookie course
+  useEffect(() => {
+    if (ingestModalOpen && echoSessionStatus?.hasSession) {
+      const target = echoSessionStatus.sectionUrl || echoSessionStatus.courseCode;
+      if (target && (!courseOutline || (echoSessionStatus.courseCode && courseOutline.courseCode !== echoSessionStatus.courseCode))) {
+        setSectionUrl(target);
+        handleDiscoverLectures(target);
+      }
+    }
+  }, [ingestModalOpen, echoSessionStatus?.hasSession, echoSessionStatus?.courseCode, echoSessionStatus?.sectionUrl]);
 
   const handleTimestampClick = (timeStr?: string) => {
     if (!timeStr) return;
@@ -432,7 +497,41 @@ export default function LecturesPage() {
     }
   };
 
-  const handleTranscriptFileUpload = (file: File) => {
+  const handleTranscriptFileUpload = async (file: File) => {
+    if (file.name.toLowerCase().endsWith(".zip")) {
+      try {
+        const zip = await JSZip.loadAsync(file);
+        let foundName = "";
+        let foundContent = "";
+        const candidateEntries = Object.entries(zip.files).filter(([relPath, entry]) => {
+          if (entry.dir || relPath.startsWith("__MACOSX")) return false;
+          const base = entry.name.split("/").pop() || "";
+          return !base.startsWith(".");
+        });
+
+        for (const [, entry] of candidateEntries) {
+          const lower = entry.name.toLowerCase();
+          if (lower.endsWith(".vtt") || lower.endsWith(".srt") || lower.endsWith(".txt") || lower.endsWith(".json")) {
+            foundName = entry.name.split("/").pop() || entry.name;
+            foundContent = await entry.async("string");
+            break;
+          }
+        }
+
+        if (foundContent) {
+          setTranscriptFileName(foundName);
+          setTranscriptText(foundContent);
+          if (!audioFilename) {
+            const base = foundName.replace(/\.[^/.]+$/, "");
+            setAudioFilename(`${base}.m4a`);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to extract transcript from zip:", err);
+      }
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = (e) => {
       const content = (e.target?.result as string) || "";
@@ -446,7 +545,41 @@ export default function LecturesPage() {
     reader.readAsText(file);
   };
 
-  const handleSlidesFileUpload = (file: File) => {
+  const handleSlidesFileUpload = async (file: File) => {
+    if (file.name.toLowerCase().endsWith(".zip")) {
+      try {
+        const zip = await JSZip.loadAsync(file);
+        let foundName = "";
+        let foundContent = "";
+        const candidateEntries = Object.entries(zip.files).filter(([relPath, entry]) => {
+          if (entry.dir || relPath.startsWith("__MACOSX")) return false;
+          const base = entry.name.split("/").pop() || "";
+          return !base.startsWith(".");
+        });
+
+        for (const [, entry] of candidateEntries) {
+          const lower = entry.name.toLowerCase();
+          if (lower.endsWith(".md") || lower.endsWith(".txt") || lower.endsWith(".tex") || lower.endsWith(".latex")) {
+            foundName = entry.name.split("/").pop() || entry.name;
+            foundContent = await entry.async("string");
+            break;
+          }
+        }
+
+        if (foundContent) {
+          setSlidesFileName(foundName);
+          setSlideText(foundContent);
+          if (!ingestTitle) {
+            const cleanName = foundName.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " ");
+            setIngestTitle(cleanName);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to extract slides from zip:", err);
+      }
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = (e) => {
       const content = (e.target?.result as string) || "";
@@ -460,13 +593,39 @@ export default function LecturesPage() {
     reader.readAsText(file);
   };
 
-  const checkEchoSession = async () => {
+  const checkEchoSession = async (autoTrigger: boolean = false) => {
     setEchoSessionChecking(true);
     try {
-      const res = await fetch("/api/lectures/echo360");
+      const ephemeralCookie = typeof window !== "undefined" ? sessionStorage.getItem("cn_echo_session_cookie") : null;
+      const ephemeralUrl = typeof window !== "undefined" ? sessionStorage.getItem("cn_echo_session_url") : null;
+      const ephemeralCourse = typeof window !== "undefined" ? sessionStorage.getItem("cn_echo_session_course") : null;
+      const headers: Record<string, string> = {};
+      if (ephemeralCookie) {
+        headers["x-echo-cookie"] = ephemeralCookie;
+      }
+      if (ephemeralUrl) {
+        headers["x-echo-section-url"] = ephemeralUrl;
+      }
+      if (ephemeralCourse) {
+        headers["x-echo-course-code"] = ephemeralCourse;
+      }
+      const res = await fetch("/api/lectures/echo360", { headers });
       if (res.ok) {
         const data = await res.json();
+        if (data.sectionUrl && typeof window !== "undefined") {
+          sessionStorage.setItem("cn_echo_session_url", data.sectionUrl);
+        }
         setEchoSessionStatus(data);
+        if (Array.isArray(data.vault)) {
+          setVaultSessions(data.vault);
+        }
+        if (autoTrigger && data.hasSession) {
+          const target = data.sectionUrl || ephemeralUrl || data.courseCode;
+          if (target) {
+            setSectionUrl(target);
+            handleDiscoverLectures(target);
+          }
+        }
       }
     } catch {
       // not in local api mode
@@ -484,14 +643,30 @@ export default function LecturesPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "save-session",
-          cookieString: pastedCookieString.trim()
+          cookieString: pastedCookieString.trim(),
+          persistToDisk: persistCookieToDisk
         })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to save session");
-      await checkEchoSession();
+
+      // Store in sessionStorage for current tab immediate use
+      if (typeof window !== "undefined") {
+        if (data.cookieHeader) sessionStorage.setItem("cn_echo_session_cookie", data.cookieHeader);
+        if (data.sectionUrl) sessionStorage.setItem("cn_echo_session_url", data.sectionUrl);
+        if (data.courseCode) sessionStorage.setItem("cn_echo_session_course", data.courseCode);
+      }
+
+      await checkEchoSession(true);
       setShowSessionSetup(false);
       setPastedCookieString("");
+      setPersistCookieToDisk(false); // Reset back to default unchecked!
+
+      const target = data.sectionUrl || data.courseCode;
+      if (target) {
+        setSectionUrl(target);
+        handleDiscoverLectures(target);
+      }
     } catch (err: any) {
       alert(err.message || "Failed to save session");
     } finally {
@@ -499,14 +674,54 @@ export default function LecturesPage() {
     }
   };
 
+  const handleSwitchVaultSession = async (item: any) => {
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("cn_echo_session_cookie", item.cookieHeader);
+    }
+    setVaultDropdownOpen(false);
+    const target = item.sectionUrl || (item.sectionId ? `https://echo360.net.au/section/${item.sectionId}/home` : item.courseCode);
+    setSectionUrl(target);
+    setEchoSessionStatus({
+      hasSession: true,
+      cookieCount: (item.cookieHeader || "").split(";").filter((c: string) => c.trim()).length,
+      courseCode: item.courseCode,
+      courseTitle: item.courseTitle,
+      term: item.term,
+      sectionId: item.sectionId,
+      sectionUrl: item.sectionUrl || (item.sectionId ? `https://echo360.net.au/section/${item.sectionId}/home` : null),
+      userEmail: item.userEmail,
+      lastUpdated: item.savedAt
+    });
+    handleDiscoverLectures(target);
+  };
+
+  const handleDeleteVaultItem = async (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    try {
+      const res = await fetch("/api/lectures/echo360", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete-vault-item", id })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setVaultSessions(data.vault || []);
+      }
+    } catch {}
+  };
+
   const handleClearEchoSession = async () => {
     try {
+      if (typeof window !== "undefined") {
+        sessionStorage.removeItem("cn_echo_session_cookie");
+      }
       await fetch("/api/lectures/echo360", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "clear-session" })
       });
       setEchoSessionStatus({ hasSession: false, cookieCount: 0 });
+      setVaultSessions([]);
     } catch {}
   };
 
@@ -525,16 +740,23 @@ export default function LecturesPage() {
 
       setAutoPullProgress("Resolving media ID and transcripts from Echo360...");
 
+      const ephemeralCookie = typeof window !== "undefined" ? sessionStorage.getItem("cn_echo_session_cookie") : null;
+      const ephemeralUrl = typeof window !== "undefined" ? sessionStorage.getItem("cn_echo_session_url") : null;
+      const pullHeaders: Record<string, string> = { "Content-Type": "application/json" };
+      if (ephemeralCookie) pullHeaders["x-echo-cookie"] = ephemeralCookie;
+      if (ephemeralUrl) pullHeaders["x-echo-section-url"] = ephemeralUrl;
+
       const res = await fetch("/api/lectures/echo360", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: pullHeaders,
         body: JSON.stringify({
           action: "pull",
           courseId,
           url: trimmed,
           downloadAudio: echoAudioOnly,
           week: ingestWeek,
-          title: ingestTitle
+          title: ingestTitle,
+          cookieHeader: ephemeralCookie || undefined
         })
       });
 
@@ -631,13 +853,21 @@ export default function LecturesPage() {
       }
 
       try {
+        const ephemeralCookie = typeof window !== "undefined" ? sessionStorage.getItem("cn_echo_session_cookie") : null;
+        const ephemeralUrl = typeof window !== "undefined" ? sessionStorage.getItem("cn_echo_session_url") : null;
+        const quickHeaders: Record<string, string> = { "Content-Type": "application/json" };
+        if (ephemeralCookie) quickHeaders["x-echo-cookie"] = ephemeralCookie;
+        if (ephemeralUrl) quickHeaders["x-echo-section-url"] = ephemeralUrl;
+
         const res = await fetch("/api/lectures/echo360", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: quickHeaders,
           body: JSON.stringify({
             action: "fetch-transcript-quick",
+            courseId,
             mediaId: item.mediaId,
-            lessonUrl: item.lessonUrl
+            lessonUrl: item.lessonUrl,
+            cookieHeader: ephemeralCookie || undefined
           })
         });
 
@@ -673,9 +903,30 @@ export default function LecturesPage() {
   };
 
   const handleDiscoverLectures = async (overrideInput?: string) => {
-    const input = (overrideInput !== undefined ? overrideInput : sectionUrl).trim();
+    const ephemeralUrl = typeof window !== "undefined" ? sessionStorage.getItem("cn_echo_session_url") : null;
+    let input = (overrideInput !== undefined ? overrideInput : sectionUrl).trim();
+    
+    // If input is empty or matches active session courseCode, prioritize known sectionUrl!
+    if (!input && echoSessionStatus?.hasSession) {
+      input = echoSessionStatus.sectionUrl || ephemeralUrl || echoSessionStatus.courseCode || "";
+    } else if (echoSessionStatus?.hasSession && echoSessionStatus.courseCode && input.toUpperCase() === echoSessionStatus.courseCode.toUpperCase()) {
+      if (echoSessionStatus.sectionUrl || ephemeralUrl) {
+        input = echoSessionStatus.sectionUrl || ephemeralUrl!;
+      }
+    }
+    
+    // Explicitly reset search and outline states immediately so previous course NEVER shows again!
+    setCourseOutline(null);
+    setDiscoveredLectures([]);
+    setCourseOutline(null);
     setAutoPullError(null);
     setBatchComplete(false);
+    setIsClosestMatch(false);
+    setClosestYear(undefined);
+    setNeedsSectionUrl(false);
+    setAvailableYears([]);
+    setAvailableTerms([]);
+    setCreatedCourseSuccess(null);
 
     if (!input) {
       setAutoPullError("Please enter a course code (e.g. MATH3701) or paste your Echo360 Section URL.");
@@ -685,26 +936,62 @@ export default function LecturesPage() {
     setDiscoveringSection(true);
 
     try {
+      const ephemeralCookie = typeof window !== "undefined" ? sessionStorage.getItem("cn_echo_session_cookie") : null;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (ephemeralCookie) {
+        headers["x-echo-cookie"] = ephemeralCookie;
+      }
+      if (ephemeralUrl) {
+        headers["x-echo-section-url"] = ephemeralUrl;
+      }
+
       const res = await fetch("/api/lectures/echo360", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           action: "discover-section",
-          courseId,
-          sectionUrl: input
+          courseId: courseId || "math3701",
+          sectionUrl: input,
+          cookieHeader: ephemeralCookie || undefined
         })
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to discover section lectures");
+      if (!res.ok) {
+        throw new Error(data.error || `Course "${input.toUpperCase()}" not found. Please verify the course code or Echo360 section URL.`);
+      }
+
+      if (!data.courseOutline && (!data.lectures || data.lectures.length === 0)) {
+        throw new Error(data.error || `Course "${input.toUpperCase()}" not found. No course outline or Echo360 recordings were located.`);
+      }
 
       if (data.courseOutline) {
         setCourseOutline(data.courseOutline);
       }
+      if (data.sectionUrl && typeof window !== "undefined") {
+        sessionStorage.setItem("cn_echo_session_url", data.sectionUrl);
+        setEchoSessionStatus((prev) => (prev ? { ...prev, sectionUrl: data.sectionUrl } : prev));
+      }
+      if (data.courseId) {
+        const cleanId = data.courseId.toLowerCase();
+        setCourseId(cleanId);
+        setActiveCourseId(cleanId);
+      }
       if (data.detectedYear) setDetectedYear(Number(data.detectedYear) || 2026);
       if (data.detectedTerm) setDetectedTerm(data.detectedTerm);
+
+      // Strictly populate only existing years and existing terms!
       if (Array.isArray(data.availableYears) && data.availableYears.length > 0) {
         setAvailableYears(data.availableYears);
+      } else if (data.detectedYear) {
+        setAvailableYears([String(data.detectedYear)]);
       }
+
+      if (Array.isArray(data.availableTerms) && data.availableTerms.length > 0) {
+        setAvailableTerms(data.availableTerms);
+      } else if (data.detectedTerm) {
+        setAvailableTerms([data.detectedTerm]);
+      }
+
       setIsClosestMatch(Boolean(data.isClosestMatch));
       setClosestYear(data.closestYear);
       setNeedsSectionUrl(Boolean(data.needsSectionUrl));
@@ -718,19 +1005,14 @@ export default function LecturesPage() {
       }));
       setDiscoveredLectures(mapped);
 
-      if (data.courseId && data.courseId.toLowerCase() !== courseId.toLowerCase()) {
-        const clean = data.courseId.toLowerCase();
-        setCourseId(clean);
-        setActiveCourseId(clean);
-        loadCourseData(clean);
-      }
-
       // Automatically pull transcripts in the background!
       if (mapped.length > 0) {
         fetchTranscriptsInBackground(mapped);
       }
     } catch (err: any) {
-      setAutoPullError(err.message || "Failed to discover lectures");
+      setCourseOutline(null);
+      setDiscoveredLectures([]);
+      setAutoPullError(err.message || `Course "${input.toUpperCase()}" not found. Please verify the course code or Echo360 section URL.`);
     } finally {
       setDiscoveringSection(false);
     }
@@ -739,7 +1021,7 @@ export default function LecturesPage() {
   const handleChangeOutlineYear = async (newYear: string) => {
     setLoadingOutline(true);
     try {
-      const cleanCourse = courseId.toUpperCase().replace(/[^A-Z0-9]/g, "");
+      const cleanCourse = (courseOutline?.courseCode || courseId).toUpperCase().replace(/[^A-Z0-9]/g, "");
       const res = await fetch(`/api/courses/outline?courseCode=${cleanCourse}&year=${newYear}&term=${detectedTerm}`);
       if (res.ok) {
         const data = await res.json();
@@ -748,6 +1030,12 @@ export default function LecturesPage() {
           setDetectedYear(Number(newYear) || detectedYear);
           setIsClosestMatch(Boolean(data.isClosestMatch));
           setClosestYear(data.closestYear);
+          if (Array.isArray(data.availableTerms) && data.availableTerms.length > 0) {
+            setAvailableTerms(data.availableTerms);
+            if (!data.availableTerms.includes(detectedTerm)) {
+              setDetectedTerm(data.availableTerms[0]);
+            }
+          }
 
           // Update outline topics on existing discovered lectures
           const scheduleLectures = (data.outline.schedule || []).filter((s: any) => s.type === "Lecture");
@@ -771,6 +1059,71 @@ export default function LecturesPage() {
       console.error("Failed to change outline year", err);
     } finally {
       setLoadingOutline(false);
+    }
+  };
+
+  const handleChangeOutlineTerm = async (newTerm: string) => {
+    setLoadingOutline(true);
+    try {
+      const cleanCourse = (courseOutline?.courseCode || courseId).toUpperCase().replace(/[^A-Z0-9]/g, "");
+      const res = await fetch(`/api/courses/outline?courseCode=${cleanCourse}&year=${detectedYear}&term=${newTerm}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.outline) {
+          setCourseOutline(data.outline);
+          setDetectedTerm(newTerm);
+          setIsClosestMatch(Boolean(data.isClosestMatch));
+          setClosestYear(data.closestYear);
+        }
+      }
+    } catch (err: any) {
+      console.error("Failed to change outline term", err);
+    } finally {
+      setLoadingOutline(false);
+    }
+  };
+
+  const handleCreateCourseFromOutline = async () => {
+    if (!courseOutline) return;
+    setIsCreatingCourse(true);
+    setAutoPullError(null);
+    setCreatedCourseSuccess(null);
+
+    const cleanCode = courseOutline.courseCode.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const cleanId = cleanCode.toLowerCase();
+    const weeksCount = Math.max(10, ...(courseOutline.schedule?.map((s) => s.week) || [10]));
+
+    try {
+      const res = await fetch("/api/courses/init", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: cleanCode,
+          name: courseOutline.courseName,
+          term: `${detectedTerm}, ${detectedYear}`,
+          institution: courseOutline.school || courseOutline.faculty || "UNSW",
+          weeks: weeksCount,
+          echo360SectionUrl: sectionUrl.startsWith("http") ? sectionUrl : undefined
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to initialize course hub");
+
+      // Set as active course
+      setCourseId(cleanId);
+      setActiveCourseId(cleanId);
+      localStorage.setItem("math_active_course", cleanId);
+
+      // Refresh catalog
+      const catalog = await getCourseCatalog().catch(() => []);
+      setAvailableCourses(catalog);
+
+      setCreatedCourseSuccess(`🎉 Course Hub for ${cleanCode} created successfully! You can now ingest lectures or upload notes.`);
+    } catch (err: any) {
+      setAutoPullError(err.message || "Failed to create course from outline");
+    } finally {
+      setIsCreatingCourse(false);
     }
   };
 
@@ -884,24 +1237,43 @@ export default function LecturesPage() {
         });
         if (res.ok) {
           const data = await res.json();
-          setContentBoxes((prev) =>
-            prev.map((b) =>
-              b.id === boxId
-                ? {
-                    ...b,
-                    files: [
-                      ...b.files,
-                      {
-                        name: file.name,
-                        size: file.size,
-                        path: data.item?.relativePath || "",
-                        status: "uploaded" as const
-                      }
-                    ]
-                  }
-                : b
-            )
-          );
+          if (data.isZip && Array.isArray(data.items) && data.items.length > 0) {
+            const newFiles = data.items.map((it: any) => ({
+              name: it.originalName,
+              size: it.size,
+              path: it.relativePath || "",
+              status: "uploaded" as const
+            }));
+            setContentBoxes((prev) =>
+              prev.map((b) =>
+                b.id === boxId
+                  ? {
+                      ...b,
+                      files: [...b.files, ...newFiles]
+                    }
+                  : b
+              )
+            );
+          } else {
+            setContentBoxes((prev) =>
+              prev.map((b) =>
+                b.id === boxId
+                  ? {
+                      ...b,
+                      files: [
+                        ...b.files,
+                        {
+                          name: file.name,
+                          size: file.size,
+                          path: data.item?.relativePath || "",
+                          status: "uploaded" as const
+                        }
+                      ]
+                    }
+                  : b
+              )
+            );
+          }
         }
       } catch (err) {
         console.error("Failed to upload content file:", err);
@@ -1144,7 +1516,7 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
           </div>
           <h1 className="text-2xl sm:text-3xl font-black text-white mt-1">Lectures & Value Insights</h1>
           <p className="text-xs sm:text-sm text-zinc-400 mt-0.5">
-            Distilled intuitions, lecturer exam traps, and timestamped audio insights for {courseId.toUpperCase()}.
+            Distilled intuitions, lecturer exam traps, and timestamped audio insights{courseId ? ` for ${courseId.toUpperCase()}` : ""}.
           </p>
         </div>
 
@@ -1158,6 +1530,9 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
               onChange={(e) => handleSwitchCourse(e.target.value)}
               className="bg-transparent text-xs font-bold text-violet-300 focus:outline-hidden cursor-pointer"
             >
+              <option value="" className="bg-zinc-900 text-zinc-400">
+                -- Select Course --
+              </option>
               {availableCourses.map((c) => (
                 <option key={c.id} value={c.id} className="bg-zinc-900 text-zinc-200">
                   {c.code} — {c.name}
@@ -1488,11 +1863,41 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
             <div className="p-8 text-center text-zinc-500 text-sm animate-pulse bg-zinc-900/50 rounded-2xl border border-zinc-800">
               Loading lectures...
             </div>
+          ) : !courseId ? (
+            <div className="p-8 text-center text-zinc-500 text-xs bg-zinc-900/30 rounded-2xl border border-dashed border-zinc-800 space-y-3">
+              <BookOpen className="w-8 h-8 text-violet-400 mx-auto" />
+              <p className="font-semibold text-zinc-200 text-sm">No Course Selected</p>
+              <p className="text-zinc-400 max-w-sm mx-auto">
+                Select an active course from the top dropdown, or click below to auto-discover and ingest a new course.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setIngestTab("echo360");
+                  setIngestModalOpen(true);
+                }}
+                className="px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs inline-flex items-center gap-1.5 transition cursor-pointer shadow-md"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>⚡ Auto-Discover Course &amp; Ingest</span>
+              </button>
+            </div>
           ) : lectures.length === 0 ? (
             <div className="p-8 text-center text-zinc-500 text-xs bg-zinc-900/30 rounded-2xl border border-dashed border-zinc-800 space-y-2">
               <Mic className="w-8 h-8 text-zinc-600 mx-auto" />
-              <p className="font-semibold text-zinc-300">No lectures ingested yet</p>
-              <p className="text-zinc-500">Click &quot;Ingest New Lecture&quot; to parse slides & transcripts.</p>
+              <p className="font-semibold text-zinc-300">No lectures ingested yet for {courseId.toUpperCase()}</p>
+              <p className="text-zinc-500">Click &quot;Guided Auto-Pull / Ingest&quot; to parse Echo360 recordings or slides.</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setIngestTab("echo360");
+                  setIngestModalOpen(true);
+                }}
+                className="px-3.5 py-1.5 rounded-lg bg-violet-600/80 hover:bg-violet-600 text-white font-semibold text-xs inline-flex items-center gap-1.5 transition cursor-pointer mt-1"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Ingest Lectures</span>
+              </button>
             </div>
           ) : (
             <div className="space-y-2">
@@ -1820,6 +2225,9 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
                     onChange={(e) => handleSwitchCourse(e.target.value)}
                     className="bg-transparent text-xs font-bold text-violet-400 focus:outline-hidden cursor-pointer"
                   >
+                    <option value="" className="bg-zinc-900 text-zinc-400">
+                      -- New / Select Course --
+                    </option>
                     {availableCourses.map((c) => (
                       <option key={c.id} value={c.id} className="bg-zinc-900 text-zinc-200">
                         {c.code}
@@ -1901,27 +2309,115 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
                         {echoSessionStatus?.hasSession ? <ShieldCheck className="w-4 h-4" /> : <Key className="w-4 h-4" />}
                       </div>
                       <div>
-                        <div className="text-xs font-bold text-zinc-100 flex items-center gap-2">
+                        <div className="text-xs font-bold text-zinc-100 flex items-center gap-2 flex-wrap">
                           <span>
                             {echoSessionStatus?.hasSession
                               ? "Echo360 Session Connected"
                               : "Echo360 Connection Required"}
                           </span>
+                          {echoSessionStatus?.hasSession && echoSessionStatus.courseCode && (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-violet-900/60 text-violet-300 border border-violet-700/50 flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse"></span>
+                              <span>Cookie Course: {echoSessionStatus.courseCode}</span>
+                              {echoSessionStatus.term && <span className="opacity-80">({echoSessionStatus.term})</span>}
+                            </span>
+                          )}
                           {echoSessionStatus?.hasSession && (
                             <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-900/60 text-emerald-300 border border-emerald-700/40">
                               {echoSessionStatus.cookieCount} Cookies Active
                             </span>
                           )}
                         </div>
-                        <p className="text-[11px] text-zinc-400">
-                          {echoSessionStatus?.hasSession
-                            ? "Ready to auto-pull recordings, clean transcripts, and audio streams."
-                            : "Connect once with your university credentials to enable 1-click lecture pulling."}
+                        <p className="text-[11px] text-zinc-400 mt-0.5">
+                          {echoSessionStatus?.hasSession ? (
+                            <span>
+                              {echoSessionStatus.courseTitle ? (
+                                <>
+                                  Scoped to: <strong className="text-zinc-200">{echoSessionStatus.courseTitle}</strong>
+                                  {echoSessionStatus.userEmail && <span className="text-zinc-500"> • {echoSessionStatus.userEmail}</span>}
+                                </>
+                              ) : (
+                                "Ready to auto-pull recordings, clean transcripts, and audio streams."
+                              )}
+                            </span>
+                          ) : (
+                            "Connect once with your university credentials to enable 1-click lecture pulling."
+                          )}
                         </p>
                       </div>
                     </div>
 
                     <div className="flex items-center gap-2">
+                      {vaultSessions.length > 0 && (
+                        <div className="relative">
+                          <button
+                            type="button"
+                            onClick={() => setVaultDropdownOpen(!vaultDropdownOpen)}
+                            className="px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold flex items-center gap-1.5 transition border border-zinc-700 cursor-pointer"
+                            title="Switch between saved course sessions"
+                          >
+                            <FolderLock className="w-3.5 h-3.5 text-violet-400" />
+                            <span>Saved Vault ({vaultSessions.length})</span>
+                            <ChevronDown className="w-3 h-3 text-zinc-400" />
+                          </button>
+
+                          {vaultDropdownOpen && (
+                            <div className="absolute right-0 top-full mt-1.5 w-80 bg-zinc-900 border border-zinc-700/80 rounded-xl shadow-2xl p-2 z-50 space-y-1 text-xs animate-in fade-in">
+                              <div className="px-2 py-1 text-[11px] font-bold text-zinc-400 border-b border-zinc-800 flex items-center justify-between">
+                                <span className="flex items-center gap-1.5">
+                                  <FolderLock className="w-3.5 h-3.5 text-violet-400" />
+                                  <span>Saved Course Vault</span>
+                                </span>
+                                <span className="text-[10px] text-zinc-500 font-mono">{vaultSessions.length} courses</span>
+                              </div>
+                              <div className="max-h-56 overflow-y-auto space-y-1 py-1">
+                                {vaultSessions.map((item) => (
+                                  <div
+                                    key={item.id}
+                                    className="p-2 rounded-lg bg-zinc-950/70 hover:bg-zinc-800/60 border border-zinc-800 flex items-center justify-between gap-2 transition"
+                                  >
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="font-mono font-bold text-violet-300 text-xs">
+                                          {item.courseCode}
+                                        </span>
+                                        {item.term && (
+                                          <span className="text-[10px] text-zinc-400 font-normal">
+                                            ({item.term})
+                                          </span>
+                                        )}
+                                      </div>
+                                      <p className="text-[10px] text-zinc-400 truncate" title={item.courseTitle}>
+                                        {item.courseTitle}
+                                      </p>
+                                    </div>
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleSwitchVaultSession(item)}
+                                        className="px-2 py-1 rounded bg-violet-600 hover:bg-violet-500 text-white font-bold text-[10px] flex items-center gap-1 transition cursor-pointer"
+                                        title={`Switch to ${item.courseCode}`}
+                                      >
+                                        <Zap className="w-3 h-3" />
+                                        <span>Use</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => handleDeleteVaultItem(e, item.id)}
+                                        className="p-1 rounded text-zinc-500 hover:text-red-400 hover:bg-zinc-800 transition cursor-pointer"
+                                        title="Delete from vault"
+                                      >
+                                        <Trash2 className="w-3 h-3" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       <button
                         type="button"
                         onClick={() => setShowSessionSetup(!showSessionSetup)}
@@ -1935,7 +2431,7 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
                           type="button"
                           onClick={handleClearEchoSession}
                           className="px-2.5 py-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-zinc-800 text-xs transition cursor-pointer"
-                          title="Clear saved Echo360 cookies"
+                          title="Clear active session"
                         >
                           Clear
                         </button>
@@ -1974,6 +2470,30 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
                         </div>
                       </div>
 
+                      {/* Red Danger Warning Card with Checkbox (OFF by Default) */}
+                      <div className="p-3 rounded-xl bg-red-950/30 border border-red-600/70 text-red-200 space-y-2 animate-in fade-in">
+                        <div className="flex items-center gap-2">
+                          <AlertOctagon className="w-4 h-4 text-red-400 shrink-0" />
+                          <span className="text-xs font-bold text-red-300 uppercase tracking-wide">
+                            Credential Persistence Warning (Danger)
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-zinc-300 leading-relaxed">
+                          Session cookies contain sensitive authentication tokens (UNSW Single Sign-On and CloudFront streaming keys).
+                          Saving writes these credentials unencrypted to local disk (<code className="text-red-300 font-mono">.echo360_session/</code>).
+                          By default, this is <strong>disabled</strong> so your cookie remains strictly in this temporary browser tab.
+                        </p>
+                        <label className="flex items-center gap-2.5 pt-1 text-xs text-red-200 font-bold cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={persistCookieToDisk}
+                            onChange={(e) => setPersistCookieToDisk(e.target.checked)}
+                            className="w-4 h-4 rounded border-red-500 text-red-600 accent-red-600 focus:ring-red-500 cursor-pointer"
+                          />
+                          <span>⚠️ Persist this session cookie to local disk for future reuse (DANGER)</span>
+                        </label>
+                      </div>
+
                       <div className="space-y-1.5">
                         <label className="text-[11px] font-bold text-zinc-300 uppercase flex items-center justify-between">
                           <span>Paste Copied cURL Command, Request Headers, or Cookies</span>
@@ -1991,9 +2511,26 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
                             type="button"
                             onClick={handleSaveEchoSession}
                             disabled={savingSession || !pastedCookieString.trim()}
-                            className="px-4 py-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs shrink-0 cursor-pointer transition shadow-md shadow-emerald-950/40"
+                            className={`px-4 py-3 rounded-lg text-white font-bold text-xs shrink-0 cursor-pointer transition flex items-center gap-1.5 shadow-md ${
+                              persistCookieToDisk
+                                ? "bg-red-700 hover:bg-red-600 border border-red-500/80 shadow-red-950/50"
+                                : "bg-emerald-600 hover:bg-emerald-500 shadow-emerald-950/40"
+                            }`}
                           >
-                            {savingSession ? "Saving..." : "Save & Connect"}
+                            {savingSession ? (
+                              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            ) : persistCookieToDisk ? (
+                              <Save className="w-3.5 h-3.5" />
+                            ) : (
+                              <Zap className="w-3.5 h-3.5" />
+                            )}
+                            <span>
+                              {savingSession
+                                ? "Connecting..."
+                                : persistCookieToDisk
+                                ? "Save to Cookie Vault & Connect"
+                                : "Use in Current Tab Only (Ephemeral)"}
+                            </span>
                           </button>
                         </div>
                       </div>
@@ -2090,18 +2627,23 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
                     </div>
 
                     {autoPullError && (
-                      <div className="p-3 rounded-lg bg-amber-950/40 border border-amber-800/60 text-amber-200 text-xs flex items-center justify-between gap-2 animate-in fade-in">
-                        <div className="flex items-center gap-2">
-                          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-                          <span>{autoPullError}</span>
+                      <div className="p-3.5 rounded-xl bg-red-950/50 border border-red-800/70 text-red-200 text-xs space-y-1 animate-in fade-in">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2 font-bold text-red-300">
+                            <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                            <span>Course Not Found</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setAutoPullError(null)}
+                            className="text-zinc-400 hover:text-white text-xs cursor-pointer"
+                          >
+                            ✕
+                          </button>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => setAutoPullError(null)}
-                          className="text-zinc-400 hover:text-white text-xs cursor-pointer"
-                        >
-                          ✕
-                        </button>
+                        <p className="text-zinc-300 pl-6 leading-relaxed">
+                          {autoPullError}
+                        </p>
                       </div>
                     )}
 
@@ -2110,72 +2652,99 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
                       <div className="space-y-4">
                         {/* Course / Syllabus Discovery Form */}
                         <div className="space-y-3">
-                          <div>
-                            <label className="text-xs font-bold text-zinc-200 flex items-center gap-1.5">
-                              <BookOpen className="w-3.5 h-3.5 text-violet-400" />
-                              <span>Course Code, Section URL, or Syllabus Link</span>
-                            </label>
-                            <p className="text-[11px] text-zinc-400 mt-0.5">
-                              Enter your course code (e.g. <strong>MATH3701</strong>, <strong>MATH2621</strong>) or paste your Echo360 Section URL. The official UNSW Course Outline and lectures will auto-load instantly.
-                            </p>
-                          </div>
-
-                          <div className="flex flex-col sm:flex-row gap-2">
-                            <input
-                              type="text"
-                              placeholder="e.g. MATH3701, COMP3121, or https://echo360.net.au/section/.../home"
-                              value={sectionUrl}
-                              onChange={(e) => setSectionUrl(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                  e.preventDefault();
-                                  handleDiscoverLectures();
-                                }
-                              }}
-                              className="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg p-2.5 text-xs text-zinc-200 font-mono focus:outline-hidden focus:border-violet-500 placeholder:text-zinc-600"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => handleDiscoverLectures()}
-                              disabled={discoveringSection || !sectionUrl.trim()}
-                              className="px-4 py-2.5 rounded-lg bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white font-bold text-xs shrink-0 cursor-pointer transition flex items-center justify-center gap-1.5 shadow-md shadow-violet-950/40"
-                            >
-                              {discoveringSection ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-                              <span>{discoveringSection ? "Scanning..." : "Auto-Discover All Lectures"}</span>
-                            </button>
-                          </div>
-
-                          {/* Quick Select Course Chips */}
-                          <div className="flex flex-wrap items-center gap-1.5 pt-0.5 text-[11px]">
-                            <span className="font-mono text-zinc-500 font-bold uppercase tracking-wider text-[10px]">Quick Select:</span>
-                            {[
-                              "SAMPLE1001",
-                              "MATH2621",
-                              "MATH3051",
-                              "MATH3701",
-                              "COMP3121"
-                            ].map((code) => (
+                          {echoSessionStatus?.hasSession && echoSessionStatus?.courseCode ? (
+                            <div className="p-3.5 rounded-xl bg-violet-950/40 border border-violet-800/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm">
+                              <div className="flex items-center gap-3">
+                                <div className="p-2 rounded-lg bg-violet-500/10 text-violet-400 border border-violet-500/20">
+                                  <Sparkles className="w-4 h-4" />
+                                </div>
+                                <div>
+                                  <div className="text-xs font-bold text-white flex items-center gap-2">
+                                    <span>Course from Echo360 Cookie:</span>
+                                    <span className="font-mono text-xs px-2 py-0.5 rounded bg-violet-600/30 text-violet-200 border border-violet-500/40 font-bold">
+                                      {echoSessionStatus.courseCode}
+                                    </span>
+                                    {echoSessionStatus.term && (
+                                      <span className="text-[11px] text-zinc-400 font-normal">
+                                        ({echoSessionStatus.term})
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-[11px] text-zinc-400 mt-0.5">
+                                    {echoSessionStatus.courseTitle || `Auto-loaded directly from your connected Echo360 session cookie.`}
+                                  </p>
+                                </div>
+                              </div>
                               <button
-                                key={code}
                                 type="button"
                                 onClick={() => {
-                                  setSectionUrl(code);
-                                  handleDiscoverLectures(code);
+                                  const target = echoSessionStatus.sectionUrl || echoSessionStatus.courseCode!;
+                                  setSectionUrl(target);
+                                  handleDiscoverLectures(target);
                                 }}
-                                className={`px-2 py-0.5 rounded font-mono text-xs transition cursor-pointer ${
-                                  sectionUrl.toUpperCase() === code || courseId.toUpperCase() === code
-                                    ? "bg-violet-600/30 text-violet-200 border border-violet-500 font-bold shadow-xs"
-                                    : "bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 border border-zinc-700"
-                                }`}
+                                disabled={discoveringSection}
+                                className="px-3.5 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white font-bold text-xs shrink-0 cursor-pointer transition flex items-center gap-1.5 shadow-md shadow-violet-950/40"
                               >
-                                {code}
+                                {discoveringSection ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                                <span>{discoveringSection ? "Discovering..." : "Re-Discover from Cookie"}</span>
                               </button>
-                            ))}
+                            </div>
+                          ) : (
+                            <div className="p-3 rounded-xl bg-amber-950/30 border border-amber-800/40 text-xs text-amber-200 flex items-center justify-between gap-2">
+                              <span>No active Echo360 cookie detected. Connect your session above to auto-detect course.</span>
+                              <button
+                                type="button"
+                                onClick={() => setShowSessionSetup(true)}
+                                className="px-2.5 py-1 rounded bg-amber-900/60 hover:bg-amber-800 text-amber-100 font-bold text-[10px] shrink-0 cursor-pointer"
+                              >
+                                Connect Session
+                              </button>
+                            </div>
+                          )}
+
+                          {/* Unified Course Code & Section URL Bar */}
+                          <div className="p-3.5 rounded-xl bg-zinc-900/80 border border-zinc-800 space-y-2">
+                            <div className="flex items-center justify-between text-xs">
+                              <label className="text-zinc-300 font-semibold flex items-center gap-1.5">
+                                <BookOpen className="w-3.5 h-3.5 text-violet-400" />
+                                <span>Course Code, Section URL, or Syllabus Link</span>
+                              </label>
+                              {echoSessionStatus?.hasSession && echoSessionStatus?.courseCode && (
+                                <span className="text-[11px] text-emerald-400 font-medium flex items-center gap-1">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                  <span>Active: {echoSessionStatus.courseCode}</span>
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex flex-col sm:flex-row gap-2">
+                              <input
+                                type="text"
+                                placeholder="e.g. MATH3701, MATH2621, or paste Echo360 Section URL..."
+                                value={sectionUrl}
+                                onChange={(e) => setSectionUrl(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    handleDiscoverLectures();
+                                  }
+                                }}
+                                className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-xs text-zinc-100 font-mono focus:outline-hidden focus:border-violet-500 placeholder:text-zinc-600 shadow-inner"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleDiscoverLectures()}
+                                disabled={discoveringSection}
+                                className="px-4 py-2.5 rounded-lg bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white font-bold text-xs shrink-0 cursor-pointer transition flex items-center justify-center gap-2 shadow-md shadow-violet-950/40"
+                              >
+                                {discoveringSection ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4 text-violet-200" />}
+                                <span>{discoveringSection ? "Discovering..." : "Auto-Discover All Lectures"}</span>
+                              </button>
+                            </div>
                           </div>
 
                           {/* Official UNSW Course Outline Card */}
                           {courseOutline && (
-                            <div className="p-3.5 rounded-xl bg-gradient-to-r from-violet-950/30 via-zinc-900/60 to-zinc-900/60 border border-violet-800/40 space-y-2.5 animate-in fade-in">
+                            <div className="p-3.5 rounded-xl bg-gradient-to-r from-violet-950/30 via-zinc-900/60 to-zinc-900/60 border border-violet-800/40 space-y-3 animate-in fade-in">
                               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                                 <div className="space-y-0.5">
                                   <div className="flex items-center gap-2">
@@ -2202,9 +2771,10 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
                                     <Calendar className="w-3.5 h-3.5 text-violet-400" />
                                     <select
                                       value={detectedYear}
-                                      disabled={loadingOutline}
+                                      disabled={loadingOutline || availableYears.length <= 1}
                                       onChange={(e) => handleChangeOutlineYear(e.target.value)}
-                                      className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 font-bold focus:outline-hidden focus:border-violet-500 cursor-pointer"
+                                      className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 font-bold focus:outline-hidden focus:border-violet-500 cursor-pointer disabled:opacity-80"
+                                      title={availableYears.length <= 1 ? "Only existing year for this course" : "Select year"}
                                     >
                                       {availableYears.map((yr) => (
                                         <option key={yr} value={yr}>
@@ -2212,9 +2782,19 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
                                         </option>
                                       ))}
                                     </select>
-                                    <span className="px-2 py-1 rounded bg-zinc-800 text-zinc-300 text-xs font-medium border border-zinc-700/60">
-                                      {detectedTerm}
-                                    </span>
+                                    <select
+                                      value={detectedTerm}
+                                      disabled={loadingOutline || availableTerms.length <= 1}
+                                      onChange={(e) => handleChangeOutlineTerm(e.target.value)}
+                                      className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 font-bold focus:outline-hidden focus:border-violet-500 cursor-pointer disabled:opacity-80"
+                                      title={availableTerms.length <= 1 ? "Only existing term for this course" : "Select term"}
+                                    >
+                                      {availableTerms.map((t) => (
+                                        <option key={t} value={t}>
+                                          {t}
+                                        </option>
+                                      ))}
+                                    </select>
                                   </div>
 
                                   {courseOutline.coid && (
@@ -2253,18 +2833,109 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
                                 </div>
                               </div>
 
-                              {/* If Course Outline loaded but no Echo360 section linked yet */}
-                              {needsSectionUrl && discoveredLectures.length === 0 && (
-                                <div className="p-3 rounded-lg bg-violet-950/40 border border-violet-800/50 text-[11px] text-violet-200 space-y-2">
-                                  <div className="flex items-center gap-2">
-                                    <Sparkles className="w-4 h-4 text-violet-400 shrink-0" />
-                                    <span className="font-semibold text-white">
-                                      Authentic UNSW Course Outline Ready!
+                              {/* 1-Click Course Hub Creation Action */}
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2.5 border-t border-violet-800/40">
+                                <div className="space-y-0.5">
+                                  <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                                    <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                                    <span>Create Course Hub from Discovered Outline</span>
+                                  </div>
+                                  <p className="text-[11px] text-zinc-400">
+                                    {courseOutline.courseCode} ({detectedTerm}, {detectedYear}) will be initialized with full schedule &amp; dossiers — zero manual typing.
+                                  </p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={handleCreateCourseFromOutline}
+                                  disabled={isCreatingCourse}
+                                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-black text-xs flex items-center gap-2 shadow-lg shadow-emerald-950/40 transition cursor-pointer disabled:opacity-50 shrink-0"
+                                >
+                                  {isCreatingCourse ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                                  <span>{isCreatingCourse ? "Initializing Hub..." : `⚡ Create Course Hub for ${courseOutline.courseCode}`}</span>
+                                </button>
+                              </div>
+
+                              {createdCourseSuccess && (
+                                <div className="p-3 rounded-lg bg-emerald-950/60 border border-emerald-800/70 text-emerald-200 text-xs flex items-center gap-2 animate-in fade-in">
+                                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                                  <span className="font-semibold">{createdCourseSuccess}</span>
+                                </div>
+                              )}
+
+                              {/* Mismatch Warning: Active Cookie Course vs Current Outline Course */}
+                              {echoSessionStatus?.hasSession && echoSessionStatus.courseCode && courseOutline && echoSessionStatus.courseCode !== courseOutline.courseCode && (
+                                <div className="p-2.5 rounded-lg bg-amber-950/40 border border-amber-800/50 text-[11px] text-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 animate-in fade-in">
+                                  <div className="flex items-center gap-1.5">
+                                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                                    <span>
+                                      Your Echo360 cookie is scoped to <strong>{echoSessionStatus.courseCode}</strong>, but you are viewing <strong>{courseOutline.courseCode}</strong>.
                                     </span>
                                   </div>
-                                  <p className="text-zinc-300">
-                                    Paste your Echo360 Section URL in the input above once to connect and auto-pull live audio and transcripts (it will be remembered forever for {courseOutline.courseCode}).
-                                  </p>
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowSessionSetup(true)}
+                                    className="px-2.5 py-1 rounded bg-amber-900/70 hover:bg-amber-800 border border-amber-700/60 text-amber-100 font-bold text-[10px] shrink-0 cursor-pointer transition self-start sm:self-auto"
+                                  >
+                                    Update Cookie for {courseOutline.courseCode}
+                                  </button>
+                                </div>
+                              )}
+
+                              {/* If Course Outline loaded but no Echo360 section linked yet */}
+                              {needsSectionUrl && discoveredLectures.length === 0 && (
+                                <div className="p-3.5 rounded-xl bg-violet-950/40 border border-violet-800/50 text-[11px] text-violet-200 space-y-2.5">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="flex items-center gap-2">
+                                      <Sparkles className="w-4 h-4 text-violet-400 shrink-0" />
+                                      <span className="font-semibold text-white">
+                                        Public UNSW Course Outline Loaded ({detectedTerm}, {detectedYear})
+                                      </span>
+                                    </div>
+                                    {availableYears.includes("2025") && detectedYear !== 2025 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleChangeOutlineYear("2025")}
+                                        className="px-2.5 py-1 rounded bg-violet-800/80 hover:bg-violet-700 border border-violet-600/50 text-white font-bold text-[10px] transition cursor-pointer flex items-center gap-1 shadow-sm"
+                                        title="Switch to 2025 Course Outline"
+                                      >
+                                        <Calendar className="w-3 h-3 text-violet-300" />
+                                        <span>Switch to 2025</span>
+                                      </button>
+                                    )}
+                                  </div>
+
+                                  <div className="space-y-2 text-zinc-300 leading-relaxed">
+                                    <p>
+                                      Course code search pulls the official syllabus from the public UNSW handbook (defaulting to {detectedYear}).
+                                    </p>
+                                    {echoSessionStatus?.hasSession && echoSessionStatus?.courseCode && echoSessionStatus.courseCode !== courseOutline.courseCode && (
+                                      <div className="p-2.5 rounded-lg bg-amber-950/40 border border-amber-800/50 text-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                        <div className="flex items-center gap-1.5">
+                                          <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                                          <span>
+                                            Connected session is for <strong>{echoSessionStatus.courseCode}</strong>. UNSW Moodle sessions are scoped to their specific course.
+                                          </span>
+                                        </div>
+                                        {echoSessionStatus.sectionUrl && (
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setSectionUrl(echoSessionStatus.sectionUrl!);
+                                              handleDiscoverLectures(echoSessionStatus.sectionUrl!);
+                                            }}
+                                            className="px-2.5 py-1 rounded bg-amber-600/80 hover:bg-amber-500 text-white font-bold text-[10px] shrink-0 transition flex items-center gap-1 cursor-pointer"
+                                          >
+                                            <Sparkles className="w-3 h-3" />
+                                            <span>Load {echoSessionStatus.courseCode} Lectures</span>
+                                          </button>
+                                        )}
+                                      </div>
+                                    )}
+                                    <p className="text-zinc-400 text-[10px]">
+                                      To link actual recordings for {courseOutline.courseCode}, open {courseOutline.courseCode} in Moodle and paste its Echo360 Section URL or session cURL in Step 1.
+                                    </p>
+                                  </div>
+
                                   {courseOutline.schedule && courseOutline.schedule.length > 0 && (
                                     <button
                                       type="button"
@@ -2391,8 +3062,8 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
                                         onChange={() => handleToggleLectureSelect(l.lessonId)}
                                         className="rounded border-zinc-700 text-violet-600 focus:ring-violet-500 cursor-pointer shrink-0"
                                       />
-                                      <div className="flex items-center gap-1 shrink-0">
-                                        <span className="text-[10px] font-mono text-zinc-500">W</span>
+                                      <div className="flex items-center gap-0.5 px-2 py-0.5 rounded-md bg-zinc-850 border border-zinc-700/70 text-zinc-400 text-[10px] font-mono shrink-0 hover:border-violet-500/60 focus-within:border-violet-500 transition shadow-xs">
+                                        <span className="text-zinc-500 font-bold select-none text-[10px]">W</span>
                                         <input
                                           type="number"
                                           min={1}
@@ -2400,8 +3071,8 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
                                           value={l.week}
                                           disabled={isBatchDownloading || l.status === "done"}
                                           onChange={(e) => handleUpdateLectureWeek(l.lessonId, parseInt(e.target.value, 10) || 1)}
-                                          className="w-9 px-1 py-0.5 text-center text-[10px] font-mono rounded bg-zinc-800 border border-zinc-700 text-zinc-200 focus:outline-hidden focus:border-violet-500"
-                                          title="Edit Week Number"
+                                          className="w-4 bg-transparent text-center font-bold text-zinc-100 focus:outline-hidden text-[10px] cursor-pointer focus:cursor-text"
+                                          title="Week number (click to change)"
                                         />
                                       </div>
                                       <div className="min-w-0 flex-1 space-y-0.5">
@@ -2740,12 +3411,12 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
                                     Click or Drag &amp; Drop {box.categoryName} files
                                   </span>
                                   <span className="text-[10px] text-zinc-500">
-                                    .pdf, .tex, .md, .txt
+                                    .pdf, .tex, .md, .txt, or .zip archive
                                   </span>
                                   <input
                                     type="file"
                                     multiple
-                                    accept=".pdf,.tex,.latex,.md,.txt,.docx,.vtt,.srt"
+                                    accept=".pdf,.tex,.latex,.md,.txt,.docx,.vtt,.srt,.zip,application/zip,application/x-zip-compressed"
                                     onChange={(e) => handleUploadFilesToBox(box.id, e.target.files)}
                                     className="hidden"
                                   />
@@ -2933,7 +3604,7 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
                   <div className="space-y-1.5">
                     <label className="text-[11px] font-bold text-zinc-300 uppercase tracking-wider flex items-center justify-between">
                       <span>Spoken Transcript</span>
-                      <span className="text-[10px] text-zinc-500 font-normal">(.vtt, .srt, .txt)</span>
+                      <span className="text-[10px] text-zinc-500 font-normal">(.vtt, .srt, .txt, .zip)</span>
                     </label>
                     <div
                       onDragOver={(e) => e.preventDefault()}
@@ -2945,7 +3616,7 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
                     >
                       <input
                         type="file"
-                        accept=".vtt,.srt,.txt,.json"
+                        accept=".vtt,.srt,.txt,.json,.zip,application/zip"
                         onChange={(e) => {
                           if (e.target.files?.[0]) handleTranscriptFileUpload(e.target.files[0]);
                         }}
@@ -2965,7 +3636,7 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
                       ) : (
                         <div>
                           <p className="text-xs font-semibold text-zinc-300">Drop transcript or click to browse</p>
-                          <p className="text-[10px] text-zinc-500 mt-0.5">Auto-cleans VTT timestamps and cue noise</p>
+                          <p className="text-[10px] text-zinc-500 mt-0.5">Auto-cleans VTT timestamps and cue noise (supports .zip)</p>
                         </div>
                       )}
                     </div>
@@ -2975,7 +3646,7 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
                   <div className="space-y-1.5">
                     <label className="text-[11px] font-bold text-zinc-300 uppercase tracking-wider flex items-center justify-between">
                       <span>Slide Notes / Theorems</span>
-                      <span className="text-[10px] text-zinc-500 font-normal">(.md, .txt)</span>
+                      <span className="text-[10px] text-zinc-500 font-normal">(.md, .txt, .tex, .zip)</span>
                     </label>
                     <div
                       onDragOver={(e) => e.preventDefault()}
@@ -2987,7 +3658,7 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
                     >
                       <input
                         type="file"
-                        accept=".md,.txt,.text"
+                        accept=".md,.txt,.text,.tex,.latex,.zip,application/zip"
                         onChange={(e) => {
                           if (e.target.files?.[0]) handleSlidesFileUpload(e.target.files[0]);
                         }}

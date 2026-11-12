@@ -12,6 +12,7 @@ const execAsync = promisify(exec);
 const BASE_DIR = process.cwd();
 const SESSION_DIR = path.join(BASE_DIR, ".echo360_session");
 const COOKIES_FILE = path.join(SESSION_DIR, "cookies.json");
+const VAULT_FILE = path.join(SESSION_DIR, "vault.json");
 const COURSES_DIR = path.join(BASE_DIR, "courses");
 
 export function safeMatterStringify(content: string = "", frontmatter: Record<string, any> = {}): string {
@@ -30,7 +31,7 @@ export function safeMatterStringify(content: string = "", frontmatter: Record<st
 
 export function parseCookiesFromAnyInput(raw: string): string {
   if (!raw || !raw.trim()) return "";
-  const text = raw.trim();
+  let text = raw.trim();
 
   // 1. JSON array of cookie objects: [{"name": "...", "value": "..."}]
   if (text.startsWith("[") && text.endsWith("]")) {
@@ -42,14 +43,18 @@ export function parseCookiesFromAnyInput(raw: string): string {
     } catch {}
   }
 
-  // 2. cURL command (Chrome/Edge/Firefox: Copy as cURL)
-  // Matches -H 'cookie: ...' or -H "cookie: ..." or --header "Cookie: ..."
-  const curlCookieMatch = text.match(/(?:-H|--header)\s+["']cookie:\s*([^"']+)["']/i);
+  // 2. cURL command (Chrome/Edge/Firefox: Copy as cURL, including Windows ^" and \")
+  const curlCookieMatch = text.match(/(?:-H|--header)\s+[\^"']*(?:cookie|Cookie):\s*([\s\S]*?)(?:[\^"']\s*(?:-H|--header|\^|$))/i);
   if (curlCookieMatch) {
-    return curlCookieMatch[1].trim();
+    let extracted = curlCookieMatch[1].trim();
+    // Clean Windows cmd caret escaping (e.g. ^& -> &, ^% -> %)
+    extracted = extracted.replace(/\^([&%<>\^|])/g, "$1");
+    // Strip trailing quotes or carets
+    extracted = extracted.replace(/[\^"']+$/, "").trim();
+    return extracted;
   }
 
-  // 3. Multiline request headers containing "Cookie: ..."
+  // 3. Fallback: match Cookie: line
   const lineCookieMatch = text.match(/^cookie:\s*(.+)$/im);
   if (lineCookieMatch) {
     return lineCookieMatch[1].trim();
@@ -135,37 +140,56 @@ function parseEcho360Transcript(json: any): { lines: string[]; fullText: string;
 
 
 
-function detectYearAndTerm(dates: string[], sectionName: string = ""): { year: string; term: string } {
-  let detectedYear = new Date().getFullYear().toString();
-  let detectedTerm = "Term 1";
+function detectYearsAndTerms(dates: string[], sectionName: string = ""): {
+  year: string;
+  term: string;
+  availableYears: string[];
+  availableTerms: string[];
+} {
+  const yearsSet = new Set<string>();
+  const termsSet = new Set<string>();
 
-  // Check section name for T1, T2, T3 and 4-digit year
+  // Check section name for 4-digit year (e.g. 2024, 2025, 2026, 2027)
   const yearInName = sectionName.match(/\b(202\d)\b/);
-  if (yearInName) detectedYear = yearInName[1];
-
-  const termInName = sectionName.match(/\b(T[123]|Term\s*[123])\b/i);
-  if (termInName) {
-    const raw = termInName[1].toUpperCase();
-    if (raw.includes("1")) detectedTerm = "Term 1";
-    else if (raw.includes("2")) detectedTerm = "Term 2";
-    else if (raw.includes("3")) detectedTerm = "Term 3";
+  if (yearInName) {
+    yearsSet.add(yearInName[1]);
   }
 
-  // If not found in name, inspect dates
+  // Check section name for T1, T2, T3 or Term 1, Term 2, Term 3
+  const termMatches = sectionName.match(/\b(T[123]|Term\s*[123])\b/gi) || [];
+  for (const t of termMatches) {
+    const raw = t.toUpperCase();
+    if (raw.includes("1")) termsSet.add("Term 1");
+    else if (raw.includes("2")) termsSet.add("Term 2");
+    else if (raw.includes("3")) termsSet.add("Term 3");
+  }
+
+  // Inspect dates from lessons
   for (const d of dates) {
     if (!d) continue;
     const parsed = new Date(d);
     if (!isNaN(parsed.getTime())) {
-      detectedYear = parsed.getFullYear().toString();
+      yearsSet.add(parsed.getFullYear().toString());
       const month = parsed.getMonth(); // 0 = Jan, 11 = Dec
-      if (month >= 0 && month <= 4) detectedTerm = "Term 1";
-      else if (month >= 5 && month <= 7) detectedTerm = "Term 2";
-      else if (month >= 8 && month <= 11) detectedTerm = "Term 3";
-      break;
+      if (month >= 0 && month <= 4) termsSet.add("Term 1");
+      else if (month >= 5 && month <= 7) termsSet.add("Term 2");
+      else if (month >= 8 && month <= 11) termsSet.add("Term 3");
     }
   }
 
-  return { year: detectedYear, term: detectedTerm };
+  const availableYears = Array.from(yearsSet).sort().reverse();
+  const availableTerms = Array.from(termsSet).sort();
+
+  const currentYear = new Date().getFullYear().toString();
+  const year = availableYears[0] || (yearInName ? yearInName[1] : currentYear);
+  const term = availableTerms[0] || "Term 1";
+
+  return {
+    year,
+    term,
+    availableYears: availableYears.length > 0 ? availableYears : [year],
+    availableTerms: availableTerms.length > 0 ? availableTerms : [term]
+  };
 }
 
 function parseSyllabusLessons(json: any, echoHost: string) {
@@ -627,6 +651,51 @@ Distill the high-yield study note JSON now:`;
   };
 }
 
+export interface VaultSessionItem {
+  id: string;
+  courseCode: string;
+  courseTitle: string;
+  term?: string | null;
+  sectionId?: string | null;
+  sectionUrl?: string | null;
+  userEmail?: string | null;
+  savedAt: string;
+  cookieHeader: string;
+  rawInput?: string;
+}
+
+export async function getVaultSessions(): Promise<VaultSessionItem[]> {
+  try {
+    const raw = await fs.readFile(VAULT_FILE, "utf-8");
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function saveVaultSession(item: VaultSessionItem): Promise<VaultSessionItem[]> {
+  await fs.mkdir(SESSION_DIR, { recursive: true });
+  const current = await getVaultSessions();
+  const filtered = current.filter((s) => s.courseCode !== item.courseCode && s.id !== item.id);
+  filtered.unshift(item);
+  await fs.writeFile(VAULT_FILE, JSON.stringify(filtered, null, 2), "utf-8");
+  return filtered;
+}
+
+export async function deleteVaultSession(id: string): Promise<VaultSessionItem[]> {
+  const current = await getVaultSessions();
+  const filtered = current.filter((s) => s.id !== id && s.courseCode !== id.toUpperCase());
+  await fs.writeFile(VAULT_FILE, JSON.stringify(filtered, null, 2), "utf-8");
+  return filtered;
+}
+
+export async function clearVault(): Promise<void> {
+  try {
+    await fs.unlink(VAULT_FILE);
+  } catch {}
+}
+
 async function getSavedCookieHeader(): Promise<string> {
   try {
     const raw = await fs.readFile(COOKIES_FILE, "utf-8");
@@ -634,9 +703,9 @@ async function getSavedCookieHeader(): Promise<string> {
     if (Array.isArray(parsed)) {
       return parsed.map((c) => `${c.name}=${c.value}`).join("; ");
     } else if (typeof parsed === "object" && parsed.cookieHeader) {
-      return parsed.cookieHeader;
+      return parseCookiesFromAnyInput(parsed.cookieHeader);
     } else if (typeof parsed === "string") {
-      return parsed;
+      return parseCookiesFromAnyInput(parsed);
     }
     return "";
   } catch {
@@ -644,73 +713,278 @@ async function getSavedCookieHeader(): Promise<string> {
   }
 }
 
-// GET: Check session status
+export async function resolveActiveCookie(
+  req: NextRequest,
+  clientCookie?: string | null,
+  courseId?: string | null
+): Promise<string> {
+  // 1. Direct body cookie
+  if (clientCookie && clientCookie.trim().length > 10) {
+    return parseCookiesFromAnyInput(clientCookie);
+  }
+
+  // 2. Request header (e.g. from sessionStorage)
+  const headerCookie = req.headers.get("x-echo-cookie");
+  if (headerCookie && headerCookie.trim().length > 10) {
+    return parseCookiesFromAnyInput(headerCookie);
+  }
+
+  // 3. Saved disk cookie (if user checked "Save cookie to disk")
+  const savedDisk = await getSavedCookieHeader();
+  if (savedDisk && savedDisk.trim().length > 10) {
+    return savedDisk;
+  }
+
+  // 4. Cookie Vault (match courseId or fallback to newest)
+  try {
+    const vault = await getVaultSessions();
+    if (vault && vault.length > 0) {
+      if (courseId) {
+        const clean = courseId.toUpperCase().replace(/[^A-Z0-9]/g, "");
+        const matched = vault.find((v) => v.courseCode?.toUpperCase() === clean);
+        if (matched && matched.cookieHeader && matched.cookieHeader.trim().length > 10) {
+          return parseCookiesFromAnyInput(matched.cookieHeader);
+        }
+      }
+      const firstValid = vault.find((v) => v.cookieHeader && v.cookieHeader.trim().length > 10);
+      if (firstValid) {
+        return parseCookiesFromAnyInput(firstValid.cookieHeader);
+      }
+    }
+  } catch {}
+
+  return "";
+}
+
+export function extractSessionMetadata(text: string): {
+  courseCode: string | null;
+  courseTitle: string | null;
+  term: string | null;
+  sectionId: string | null;
+  sectionUrl: string | null;
+  userEmail: string | null;
+} {
+  let courseCode: string | null = null;
+  let courseTitle: string | null = null;
+  let term: string | null = null;
+  let sectionId: string | null = null;
+  let userEmail: string | null = null;
+
+  if (!text) return { courseCode, courseTitle, term, sectionId, sectionUrl: null, userEmail };
+
+  // Unescape Windows carets (e.g. ^&, %^28, etc.)
+  const clean = text.replace(/\^/g, "");
+
+  // 1. contextTitle inside PLAY_SESSION
+  const titleMatch = clean.match(/contextTitle=([^&;\^\"'\s]+)/i);
+  if (titleMatch) {
+    try {
+      courseTitle = decodeURIComponent(titleMatch[1].replace(/\+/g, " "));
+      const codeMatch = courseTitle.match(/\b([A-Za-z]{4}\s*\d{4})\b/);
+      if (codeMatch) courseCode = codeMatch[1].toUpperCase().replace(/\s+/g, "");
+      const termMatch = courseTitle.match(/\(?(\d{4}\s*T\d)\)?/i);
+      if (termMatch) term = termMatch[1];
+    } catch {}
+  }
+
+  // 2. Section ID from URL or Referer
+  const secMatch = clean.match(/section\/([0-9a-fA-F-]{36}|[0-9a-zA-Z_-]+)/i);
+  if (secMatch) sectionId = secMatch[1];
+
+  // 3. ECHO_JWT
+  const jwtMatch = clean.match(/ECHO_JWT=([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)/);
+  if (jwtMatch) {
+    try {
+      const parts = jwtMatch[1].split(".");
+      const payload = JSON.parse(Buffer.from(parts[1], "base64").toString("utf8"));
+      if (payload.sub || payload.ssoId) userEmail = payload.sub || payload.ssoId;
+    } catch {}
+  }
+
+  const sectionUrl = sectionId ? `https://echo360.net.au/section/${sectionId}/home` : null;
+
+  return { courseCode, courseTitle, term, sectionId, sectionUrl, userEmail };
+}
+
+// GET: Check session status (supports ephemeral header or saved vault/file)
 export async function GET(req: NextRequest) {
   try {
-    const cookieHeader = await getSavedCookieHeader();
+    const headerCookie = req.headers.get("x-echo-cookie") || "";
+    const headerSectionUrl = req.headers.get("x-echo-section-url") || "";
+    const cookieHeader = headerCookie ? parseCookiesFromAnyInput(headerCookie) : (await getSavedCookieHeader());
     let fileStat = null;
+    let rawContent = "";
     try {
       fileStat = await fs.stat(COOKIES_FILE);
+      rawContent = await fs.readFile(COOKIES_FILE, "utf-8");
     } catch {}
 
+    const vault = await getVaultSessions();
     const hasSession = Boolean(cookieHeader && cookieHeader.trim().length > 10);
     const count = hasSession ? cookieHeader.split(";").filter((c) => c.trim()).length : 0;
 
+    const sourceText = headerCookie || rawContent || cookieHeader;
+    const meta = hasSession && sourceText ? extractSessionMetadata(sourceText) : {
+      courseCode: null,
+      courseTitle: null,
+      term: null,
+      sectionId: null,
+      sectionUrl: null,
+      userEmail: null
+    };
+
+    if (headerSectionUrl && !meta.sectionUrl) {
+      meta.sectionUrl = headerSectionUrl;
+      const m = headerSectionUrl.match(/section\/([0-9a-fA-F-]{36}|[0-9a-zA-Z_-]+)/i);
+      if (m) meta.sectionId = m[1];
+    }
+
+    // Auto-restore sectionUrl from courses/<courseCode>/course.json if missing
+    if (!meta.sectionUrl && meta.courseCode) {
+      try {
+        const configPath = path.join(COURSES_DIR, meta.courseCode.toUpperCase(), "course.json");
+        const cfg = JSON.parse(await fs.readFile(configPath, "utf-8"));
+        if (cfg.echo360SectionUrl) {
+          meta.sectionUrl = cfg.echo360SectionUrl;
+          const m = cfg.echo360SectionUrl.match(/section\/([0-9a-fA-F-]{36}|[0-9a-zA-Z_-]+)/i);
+          if (m) meta.sectionId = m[1];
+        }
+      } catch {}
+    }
+
     return NextResponse.json({
       hasSession,
+      isEphemeral: Boolean(headerCookie && !rawContent),
       cookieCount: count,
-      lastUpdated: fileStat ? fileStat.mtime.toISOString() : null
+      lastUpdated: fileStat ? fileStat.mtime.toISOString() : null,
+      courseCode: meta.courseCode,
+      courseTitle: meta.courseTitle,
+      term: meta.term,
+      sectionId: meta.sectionId,
+      sectionUrl: meta.sectionUrl,
+      userEmail: meta.userEmail,
+      vault
     });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
 
-// POST: Actions (save-session, clear-session, pull)
+// POST: Actions (save-session, list-vault, delete-vault-item, clear-vault, pull)
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const { action } = body;
 
-    // ACTION: Save Session
+    // ACTION: Save Session (Ephemeral by default, or persistent to Vault if persistToDisk=true)
     if (action === "save-session") {
-      const { cookies, cookieString } = body;
-      await fs.mkdir(SESSION_DIR, { recursive: true });
+      const { cookies, cookieString, persistToDisk = false } = body;
+      let cleanedCookies = "";
+      let rawText = "";
 
-      let toSave: any;
       if (Array.isArray(cookies)) {
-        toSave = cookies;
+        cleanedCookies = cookies.map((c: any) => `${c.name}=${c.value}`).join("; ");
+        rawText = JSON.stringify(cookies);
       } else if (cookieString && typeof cookieString === "string") {
-        const cleanedCookies = parseCookiesFromAnyInput(cookieString);
+        cleanedCookies = parseCookiesFromAnyInput(cookieString);
+        rawText = cookieString;
         if (!cleanedCookies) {
           return NextResponse.json({ error: "Could not parse valid cookies from the provided input." }, { status: 400 });
         }
-        toSave = { cookieHeader: cleanedCookies };
       } else {
         return NextResponse.json({ error: "Missing cookie content to save" }, { status: 400 });
       }
 
-      await fs.writeFile(COOKIES_FILE, JSON.stringify(toSave, null, 2), "utf-8");
-      const count = Array.isArray(toSave) ? toSave.length : (toSave.cookieHeader || "").split(";").filter((c: string) => c.trim()).length;
+      const meta = extractSessionMetadata(rawText || cleanedCookies);
+      const count = cleanedCookies.split(";").filter((c: string) => c.trim()).length;
+
+      // Auto-save discovered section link directly to course.json
+      if (meta.courseCode && meta.sectionUrl) {
+        try {
+          const courseDir = path.join(COURSES_DIR, meta.courseCode.toUpperCase());
+          await fs.mkdir(courseDir, { recursive: true });
+          const configPath = path.join(courseDir, "course.json");
+          let config: any = {};
+          try {
+            config = JSON.parse(await fs.readFile(configPath, "utf-8"));
+          } catch {}
+          config.echo360SectionUrl = meta.sectionUrl;
+          await fs.writeFile(configPath, JSON.stringify(config, null, 2), "utf-8");
+        } catch (err) {
+          console.warn("Could not auto-save echo360SectionUrl to course.json:", err);
+        }
+      }
+
+      let vault: VaultSessionItem[] = [];
+      if (persistToDisk) {
+        await fs.mkdir(SESSION_DIR, { recursive: true });
+        const toSave = { cookieHeader: cleanedCookies, rawInput: rawText };
+        await fs.writeFile(COOKIES_FILE, JSON.stringify(toSave, null, 2), "utf-8");
+
+        const sessionItem: VaultSessionItem = {
+          id: (meta.courseCode || `session-${Date.now()}`).toLowerCase(),
+          courseCode: meta.courseCode || "GENERAL",
+          courseTitle: meta.courseTitle || `${meta.courseCode || "Echo360"} Session`,
+          term: meta.term || null,
+          sectionId: meta.sectionId || null,
+          sectionUrl: meta.sectionUrl || null,
+          userEmail: meta.userEmail || null,
+          savedAt: new Date().toISOString(),
+          cookieHeader: cleanedCookies,
+          rawInput: rawText
+        };
+        vault = await saveVaultSession(sessionItem);
+      } else {
+        vault = await getVaultSessions();
+      }
 
       return NextResponse.json({
         success: true,
-        message: `Saved ${count} session cookies to local storage`,
-        cookieCount: count
+        persisted: Boolean(persistToDisk),
+        message: persistToDisk
+          ? `Persisted ${meta.courseCode || "Echo360"} session to Cookie Vault`
+          : "Session active in current browser tab only (ephemeral)",
+        cookieHeader: cleanedCookies,
+        cookieCount: count,
+        courseCode: meta.courseCode,
+        courseTitle: meta.courseTitle,
+        term: meta.term,
+        sectionId: meta.sectionId,
+        sectionUrl: meta.sectionUrl,
+        userEmail: meta.userEmail,
+        vault
       });
     }
 
-    // ACTION: Clear Session
-    if (action === "clear-session") {
+    // ACTION: List Vault
+    if (action === "list-vault") {
+      const vault = await getVaultSessions();
+      return NextResponse.json({ success: true, vault });
+    }
+
+    // ACTION: Delete Vault Item
+    if (action === "delete-vault-item") {
+      const { id } = body;
+      const vault = await deleteVaultSession(id);
+      return NextResponse.json({ success: true, message: `Removed session ${id} from vault`, vault });
+    }
+
+    // ACTION: Clear Entire Vault & Session
+    if (action === "clear-vault" || action === "clear-session") {
+      await clearVault();
       try {
         await fs.unlink(COOKIES_FILE);
       } catch {}
-      return NextResponse.json({ success: true, message: "Echo360 session cleared" });
+      return NextResponse.json({ success: true, message: "Cleared all saved cookies from vault", vault: [] });
     }
 
     // ACTION: Discover Section Syllabus & Lectures
     if (action === "discover-section") {
       let { courseId = "math3701", sectionUrl, cookieHeader: clientCookieHeader } = body;
+      const headerCookie = req.headers.get("x-echo-cookie");
+      if (!clientCookieHeader && headerCookie) {
+        clientCookieHeader = headerCookie;
+      }
       let cleanCourse = (courseId || "math3701").toUpperCase().replace(/[^A-Z0-9]/g, "");
 
       let rawInput = (sectionUrl || "").trim();
@@ -722,11 +996,17 @@ export async function POST(req: NextRequest) {
         rawInput.includes("echo360") ||
         rawInput.includes("/");
 
-      if (!isInputUrl && rawInput) {
+      const directCodeMatch = rawInput.match(/\b([A-Za-z]{4}\s*\d{4})\b/);
+      if (directCodeMatch) {
+        cleanCourse = directCodeMatch[1].toUpperCase().replace(/\s+/g, "");
+      } else if (!isInputUrl && rawInput) {
         cleanCourse = rawInput.toUpperCase().replace(/[^A-Z0-9]/g, "");
       }
 
-      // Check if course has a saved echo360SectionUrl in course.json
+      const headerSectionUrl = req.headers.get("x-echo-section-url");
+
+      // Check for saved or active section URL in priority order:
+      // 1. Check if course has a saved echo360SectionUrl in course.json
       let savedSectionUrl = "";
       try {
         const configRaw = await fs.readFile(path.join(COURSES_DIR, cleanCourse, "course.json"), "utf-8");
@@ -734,7 +1014,51 @@ export async function POST(req: NextRequest) {
         if (config.echo360SectionUrl) {
           savedSectionUrl = config.echo360SectionUrl;
         }
-      } catch {}
+      } catch {
+        try {
+          const configRaw = await fs.readFile(path.join(COURSES_DIR, cleanCourse.toLowerCase(), "course.json"), "utf-8");
+          const config = JSON.parse(configRaw);
+          if (config.echo360SectionUrl) {
+            savedSectionUrl = config.echo360SectionUrl;
+          }
+        } catch {}
+      }
+
+      // 2. Check headerSectionUrl
+      if (!savedSectionUrl && headerSectionUrl) {
+        savedSectionUrl = headerSectionUrl;
+      }
+
+      // 2. Check active session cookie metadata
+      let sessionSource = clientCookieHeader || "";
+      if (!sessionSource) {
+        try {
+          const fileRaw = await fs.readFile(COOKIES_FILE, "utf-8");
+          const parsed = JSON.parse(fileRaw);
+          sessionSource = parsed.rawInput || parsed.cookieHeader || "";
+        } catch {}
+      }
+      const activeMeta = extractSessionMetadata(sessionSource);
+
+      // If active session has a sectionUrl and matches this course (or user didn't specify a different code)
+      if (!savedSectionUrl && activeMeta.sectionUrl) {
+        if (!activeMeta.courseCode || activeMeta.courseCode === cleanCourse || !rawInput) {
+          savedSectionUrl = activeMeta.sectionUrl;
+          if (activeMeta.courseCode) cleanCourse = activeMeta.courseCode;
+        }
+      }
+
+      // 3. Check Vault for this course
+      if (!savedSectionUrl) {
+        const vault = await getVaultSessions();
+        const vaultItem = vault.find((v) => v.courseCode === cleanCourse || v.id === cleanCourse.toLowerCase());
+        if (vaultItem && (vaultItem.sectionUrl || vaultItem.sectionId)) {
+          savedSectionUrl = vaultItem.sectionUrl || `https://echo360.net.au/section/${vaultItem.sectionId}/home`;
+          if (!clientCookieHeader && vaultItem.cookieHeader) {
+            clientCookieHeader = vaultItem.cookieHeader;
+          }
+        }
+      }
 
       if (!isInputUrl && savedSectionUrl) {
         rawInput = savedSectionUrl;
@@ -743,16 +1067,30 @@ export async function POST(req: NextRequest) {
       // If still not a URL, fetch and return the UNSW course outline immediately!
       if (!rawInput || (!rawInput.startsWith("http") && !rawInput.includes("echo360") && !rawInput.includes("/"))) {
         const outlineResult = await fetchUNSWCourseOutline(cleanCourse);
+        if (!outlineResult.outline) {
+          return NextResponse.json({
+            error: outlineResult.error || `Course "${cleanCourse}" not found in UNSW Course Outlines. Please check the course code or paste an Echo360 Section URL.`,
+            courseOutline: null,
+            lectures: []
+          }, { status: 404 });
+        }
         return NextResponse.json({
           success: true,
           count: 0,
           courseId: cleanCourse,
           sectionTitle: `${cleanCourse} (UNSW Course Outline)`,
           lectures: [],
-          courseOutline: outlineResult.outline || null,
+          courseOutline: outlineResult.outline,
           availableYears: outlineResult.availableYears,
+          availableTerms: outlineResult.availableTerms,
+          detectedYear: outlineResult.outline.year,
+          detectedTerm: outlineResult.outline.term,
           needsSectionUrl: true,
-          message: `UNSW Course Outline for ${cleanCourse} loaded. Please paste the Echo360 Section URL once to link lecture recordings.`
+          activeSessionCourse: activeMeta.courseCode || null,
+          activeSessionSectionUrl: activeMeta.sectionUrl || null,
+          message: activeMeta.courseCode && activeMeta.courseCode !== cleanCourse
+            ? `Connected Echo360 session is for ${activeMeta.courseCode}. To link recordings for ${cleanCourse}, paste your ${cleanCourse} Echo360 Section URL or connect your ${cleanCourse} Moodle session.`
+            : `UNSW Course Outline for ${cleanCourse} loaded. Paste the Echo360 Section URL once to link lecture recordings.`
         });
       }
 
@@ -811,18 +1149,7 @@ export async function POST(req: NextRequest) {
           echoHost = uObj.origin;
         } catch {}
 
-        // Save section URL to course.json for future instant access
-        try {
-          const configPath = path.join(COURSES_DIR, cleanCourse, "course.json");
-          const configRaw = await fs.readFile(configPath, "utf-8");
-          const config = JSON.parse(configRaw);
-          if (config.echo360SectionUrl !== cleanUrl) {
-            config.echo360SectionUrl = cleanUrl;
-            await fs.writeFile(configPath, JSON.stringify(config, null, 2), "utf-8");
-          }
-        } catch {}
-
-        let activeCookie = clientCookieHeader ? parseCookiesFromAnyInput(clientCookieHeader) : (await getSavedCookieHeader());
+        let activeCookie = await resolveActiveCookie(req, clientCookieHeader, cleanCourse);
         if (!activeCookie) {
           const outlineResult = await fetchUNSWCourseOutline(cleanCourse);
           return NextResponse.json(
@@ -878,11 +1205,54 @@ export async function POST(req: NextRequest) {
         }
 
         if (discoveredLessons.length > 0) {
-          // Detect Year and Term
-          const dates = discoveredLessons.map((l) => l.rawStartTime).filter(Boolean);
-          const detection = detectYearAndTerm(dates, sectionTitle);
+          // Detect actual course code from Echo360 section title or lesson titles!
+          let detectedCourseMatch = sectionTitle.match(/\b([A-Za-z]{4}\s*\d{4})\b/);
+          if (!detectedCourseMatch) {
+            for (const l of discoveredLessons) {
+              const m = (l.title || "").match(/\b([A-Za-z]{4}\s*\d{4})\b/);
+              if (m) {
+                detectedCourseMatch = m;
+                break;
+              }
+            }
+          }
 
-          // Query official UNSW Course Outline
+          if (detectedCourseMatch) {
+            cleanCourse = detectedCourseMatch[1].toUpperCase().replace(/\s+/g, "");
+          } else if (activeMeta.courseCode) {
+            cleanCourse = activeMeta.courseCode.toUpperCase().replace(/[^A-Z0-9]/g, "");
+          }
+
+          // Detect Year and Term from Echo360 section & lessons
+          const dates = discoveredLessons.map((l) => l.rawStartTime).filter(Boolean);
+          const detection = detectYearsAndTerms(dates, sectionTitle);
+
+          // Save section URL to course.json for this specific detected course
+          try {
+            const courseDir = path.join(COURSES_DIR, cleanCourse);
+            await fs.mkdir(courseDir, { recursive: true });
+            const configPath = path.join(courseDir, "course.json");
+            let config: any = {};
+            try {
+              const configRaw = await fs.readFile(configPath, "utf-8");
+              config = JSON.parse(configRaw);
+            } catch {}
+            if (config.echo360SectionUrl !== cleanUrl) {
+              config.echo360SectionUrl = cleanUrl;
+              await fs.writeFile(configPath, JSON.stringify(config, null, 2), "utf-8");
+            }
+
+            // Also update Vault entry if it exists for this course
+            const vault = await getVaultSessions();
+            const idx = vault.findIndex((v) => v.courseCode === cleanCourse);
+            if (idx >= 0 && (!vault[idx].sectionUrl || !vault[idx].sectionId)) {
+              vault[idx].sectionUrl = cleanUrl;
+              vault[idx].sectionId = sectionId;
+              await fs.writeFile(VAULT_FILE, JSON.stringify(vault, null, 2), "utf-8");
+            }
+          } catch {}
+
+          // Query official UNSW Course Outline for the ACTUAL detected course!
           const outlineResult = await fetchUNSWCourseOutline(cleanCourse, detection.year, detection.term);
 
           // Pair each lecture's week to the course outline schedule
@@ -902,6 +1272,7 @@ export async function POST(req: NextRequest) {
             success: true,
             count: discoveredLessons.length,
             sectionId,
+            sectionUrl: cleanUrl,
             sectionTitle,
             courseId: cleanCourse,
             lectures: discoveredLessons,
@@ -910,8 +1281,18 @@ export async function POST(req: NextRequest) {
             detectedTerm: detection.term,
             isClosestMatch: outlineResult.isClosestMatch,
             closestYear: outlineResult.closestYear,
-            availableYears: outlineResult.availableYears
+            availableYears: detection.availableYears,
+            availableTerms: detection.availableTerms
           });
+        } else {
+          return NextResponse.json(
+            {
+              error: `Could not load recordings for Echo360 section (${sectionId.slice(0, 8)}). Your Echo360 session may have expired or is unauthorized for this section. Please reconnect your session in Step 1.`,
+              courseOutline: null,
+              lectures: []
+            },
+            { status: 401 }
+          );
         }
       }
 
@@ -939,13 +1320,15 @@ export async function POST(req: NextRequest) {
           sectionTitle: "Single Lecture",
           courseId: cleanCourse,
           courseOutline: outlineResult.outline || null,
+          availableYears: outlineResult.availableYears,
+          availableTerms: outlineResult.availableTerms,
           lectures: singleItems
         });
       }
 
       return NextResponse.json(
-        { error: "Could not discover lectures from the provided URL. Ensure it is a valid Echo360 Section or Syllabus URL, or paste multiple lecture links." },
-        { status: 400 }
+        { error: `Could not discover lectures or course data from the provided URL. Please verify the section link or ensure your Echo360 session is active.` },
+        { status: 404 }
       );
     }
 
@@ -957,7 +1340,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "Missing mediaId" }, { status: 400 });
       }
 
-      let activeCookie = clientCookieHeader ? parseCookiesFromAnyInput(clientCookieHeader) : (await getSavedCookieHeader());
+      let activeCookie = await resolveActiveCookie(req, clientCookieHeader, body.courseId);
       if (!activeCookie) {
         return NextResponse.json({ error: "Missing Echo360 session cookie" }, { status: 401 });
       }
@@ -1062,7 +1445,7 @@ export async function POST(req: NextRequest) {
 
       // If media download is required
       if (phase === "download-media" || phase === "all") {
-        let activeCookie = clientCookieHeader ? parseCookiesFromAnyInput(clientCookieHeader) : (await getSavedCookieHeader());
+        let activeCookie = await resolveActiveCookie(req, clientCookieHeader, cleanCourse);
         if (!activeCookie) {
           return NextResponse.json({ error: "Missing Echo360 session authentication. Please connect your session in Step 1." }, { status: 401 });
         }
@@ -1297,7 +1680,7 @@ export async function POST(req: NextRequest) {
       await fs.mkdir(audioDir, { recursive: true });
 
       // Check session
-      let activeCookie = clientCookieHeader ? parseCookiesFromAnyInput(clientCookieHeader) : (await getSavedCookieHeader());
+      let activeCookie = await resolveActiveCookie(req, clientCookieHeader, body.courseId);
       if (!activeCookie || activeCookie.trim().length < 5) {
         return NextResponse.json(
           {

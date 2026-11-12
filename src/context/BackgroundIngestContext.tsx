@@ -235,9 +235,15 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
       saveSessionToStorage(currentSession);
 
       try {
+        const ephemeralCookie = typeof window !== "undefined" ? sessionStorage.getItem("cn_echo_session_cookie") : null;
+        const ephemeralUrl = typeof window !== "undefined" ? sessionStorage.getItem("cn_echo_session_url") : null;
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (ephemeralCookie) headers["x-echo-cookie"] = ephemeralCookie;
+        if (ephemeralUrl) headers["x-echo-section-url"] = ephemeralUrl;
+
         const res = await fetch("/api/lectures/echo360", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify({
             action: "auto-ingest",
             phase: "distill-note",
@@ -253,6 +259,7 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
             requireAi,
             outlineTopic: item.outlineTopic,
             outlineDescription: item.outlineDescription,
+            cookieHeader: ephemeralCookie || undefined,
             aiSettings
           })
         });
@@ -402,9 +409,15 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
       saveSessionToStorage(currentSession);
 
       try {
+        const ephemeralCookie = typeof window !== "undefined" ? sessionStorage.getItem("cn_echo_session_cookie") : null;
+        const ephemeralUrl = typeof window !== "undefined" ? sessionStorage.getItem("cn_echo_session_url") : null;
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (ephemeralCookie) headers["x-echo-cookie"] = ephemeralCookie;
+        if (ephemeralUrl) headers["x-echo-section-url"] = ephemeralUrl;
+
         const res = await fetch("/api/lectures/echo360", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify({
             action: "auto-ingest",
             phase: "download-media",
@@ -417,7 +430,8 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
             lessonUrl: item.lessonUrl,
             downloadAudio: echoAudioOnly,
             outlineTopic: item.outlineTopic,
-            outlineDescription: item.outlineDescription
+            outlineDescription: item.outlineDescription,
+            cookieHeader: ephemeralCookie || undefined
           })
         });
 
