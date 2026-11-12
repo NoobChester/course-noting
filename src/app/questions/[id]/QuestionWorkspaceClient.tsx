@@ -275,11 +275,14 @@ export function QuestionWorkspaceClient({ id }: { id: string }) {
     try {
       const courseId = getActiveCourseId();
 
-      // Load AI settings from localStorage
-      let aiSettings: AISettings = { provider: "gemini" };
+      // Load AI settings from localStorage (default to Antigravity in Local Studio)
+      let aiSettings: AISettings = { provider: isLocalStudio() ? "antigravity" : "gemini" };
       try {
         const stored = localStorage.getItem("cn_ai_settings");
-        if (stored) aiSettings = JSON.parse(stored);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed && parsed.provider) aiSettings = parsed;
+        }
       } catch {}
 
       const apiKey =
@@ -329,7 +332,9 @@ export function QuestionWorkspaceClient({ id }: { id: string }) {
 
       // Local Studio: Call local Node API proxy
       const chosenModel =
-        aiSettings.provider === "gemini"
+        aiSettings.provider === "antigravity"
+          ? aiSettings.antigravityModel
+          : aiSettings.provider === "gemini"
           ? aiSettings.geminiModel
           : aiSettings.provider === "openai"
           ? aiSettings.openaiModel
@@ -347,6 +352,7 @@ export function QuestionWorkspaceClient({ id }: { id: string }) {
           apiKey,
           provider: aiSettings.provider,
           model: chosenModel,
+          antigravityModel: aiSettings.antigravityModel,
           geminiModel: aiSettings.geminiModel,
           openaiModel: aiSettings.openaiModel,
           anthropicModel: aiSettings.anthropicModel,

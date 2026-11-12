@@ -25,6 +25,7 @@ interface SettingsModalProps {
 
 const DEFAULT_SETTINGS: AISettings = {
   provider: "gemini",
+  antigravityModel: "gemini-4-hydrogen-medium",
   geminiKey: "",
   geminiModel: "gemini-2.5-flash",
   openaiKey: "",
@@ -34,6 +35,17 @@ const DEFAULT_SETTINGS: AISettings = {
   ollamaUrl: "http://localhost:11434",
   ollamaModel: "llama3"
 };
+
+const DEFAULT_ANTIGRAVITY_PRESETS = [
+  { id: "gemini-4-hydrogen-medium", label: "Gemini 4 Hydrogen Medium" },
+  { id: "gemini-4-hydrogen-high", label: "Gemini 4 Hydrogen High" },
+  { id: "gemini-4-hydrogen-low", label: "Gemini 4 Hydrogen Low" },
+  { id: "gemini-4-argon-medium", label: "Gemini 4 Argon Medium" },
+  { id: "gemini-3.8-flash-medium", label: "Gemini 3.8 Flash Medium" },
+  { id: "gemini-3.8-flash-low", label: "Gemini 3.8 Flash Low" },
+  { id: "claude-sonnet-5-5-medium", label: "Claude Sonnet 5.5 Medium" },
+  { id: "claude-opus-5-5-medium", label: "Claude Opus 5.5 Medium" }
+];
 
 const DEFAULT_GEMINI_PRESETS = [
   { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", badge: "Recommended", desc: "Latest high-speed multimodal model" },
@@ -67,6 +79,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [isLocal, setIsLocal] = useState(true);
 
   // Dynamic model discovery states
+  const [availableAntigravityModels, setAvailableAntigravityModels] = useState<
+    { id: string; label: string }[]
+  >(DEFAULT_ANTIGRAVITY_PRESETS);
   const [availableGeminiModels, setAvailableGeminiModels] = useState<string[]>(
     DEFAULT_GEMINI_PRESETS.map((p) => p.id)
   );
@@ -75,17 +90,40 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [customModelMode, setCustomModelMode] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-    setIsLocal(isLocalStudio());
+    const local = isLocalStudio();
+    setIsLocal(local);
     if (isOpen) {
       setTestResult(null);
       setSavedSuccess(false);
+      const localDefaults: AISettings = {
+        ...DEFAULT_SETTINGS,
+        provider: local ? "antigravity" : "gemini"
+      };
       try {
         const stored = localStorage.getItem("cn_ai_settings");
         if (stored) {
-          setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(stored) });
+          setSettings({ ...localDefaults, ...JSON.parse(stored) });
+        } else {
+          setSettings(localDefaults);
         }
       } catch (err) {
         console.error("Failed to load AI settings:", err);
+        setSettings(localDefaults);
+      }
+
+      if (local) {
+        fetch("/api/ai/models?provider=antigravity")
+          .then((r) => (r.ok ? r.json() : null))
+          .then((data) => {
+            if (data?.modelOptions && Array.isArray(data.modelOptions) && data.modelOptions.length > 0) {
+              setAvailableAntigravityModels(data.modelOptions);
+            } else if (Array.isArray(data?.models) && data.models.length > 0) {
+              setAvailableAntigravityModels(data.models.map((id: string) => ({ id, label: id })));
+            }
+          })
+          .catch(() => {
+            // Keep default presets cleanly
+          });
       }
     }
   }, [isOpen]);
@@ -110,6 +148,40 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       }, 1000);
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleFetchAntigravityModels = async () => {
+    setFetchingModels(true);
+    setTestResult(null);
+    try {
+      const res = await fetch("/api/ai/models?provider=antigravity");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to query agy CLI");
+
+      const opts: { id: string; label: string }[] = Array.isArray(data.modelOptions)
+        ? data.modelOptions
+        : Array.isArray(data.models)
+        ? data.models.map((id: string) => ({ id, label: id }))
+        : [];
+
+      if (opts.length > 0) {
+        setAvailableAntigravityModels(opts);
+        if (!opts.some((m) => m.id === (settings.antigravityModel || ""))) {
+          setSettings((prev) => ({ ...prev, antigravityModel: opts[0].id }));
+        }
+        setTestResult({
+          success: true,
+          message: `Discovered ${opts.length} models from local Antigravity CLI!`
+        });
+      }
+    } catch (err: any) {
+      setTestResult({
+        success: false,
+        message: `Failed to fetch Antigravity models: ${err.message}`
+      });
+    } finally {
+      setFetchingModels(false);
     }
   };
 
@@ -191,7 +263,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         : "";
 
     const currentModel =
-      settings.provider === "gemini"
+      settings.provider === "antigravity"
+        ? settings.antigravityModel
+        : settings.provider === "gemini"
         ? settings.geminiModel
         : settings.provider === "openai"
         ? settings.openaiModel
@@ -199,7 +273,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         ? settings.anthropicModel
         : settings.ollamaModel;
 
-    if (settings.provider !== "ollama" && !currentKey?.trim()) {
+    if (settings.provider !== "ollama" && settings.provider !== "antigravity" && !currentKey?.trim()) {
       setTesting(false);
       setTestResult({
         success: false,
@@ -223,8 +297,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       if (settings.provider === "antigravity") {
         setTesting(false);
         setTestResult({
-          success: true,
-          message: "Antigravity Local Bridge is active and ready in this workspace!"
+          success: false,
+          message:
+            "Antigravity Local Bridge requires Localhost Studio ('npm run dev'). On static GitHub Pages, switch to Google Gemini (Free Tier) with an API key."
         });
         return;
       }
@@ -256,6 +331,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           provider: settings.provider,
           apiKey: currentKey?.trim(),
           model: currentModel,
+          antigravityModel: settings.antigravityModel,
           geminiModel: settings.geminiModel,
           openaiModel: settings.openaiModel,
           anthropicModel: settings.anthropicModel,
@@ -355,7 +431,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   <span className="text-[10px] text-emerald-400 font-medium">Workspace-Aware</span>
                 </div>
                 <div className="text-[10px] text-zinc-500 mt-1">
-                  Routes proof audits directly through your local Antigravity session with LaTeX chapter awareness.
+                  Routes lecture distillation and proof auditing through your authenticated local Antigravity CLI (`agy`) with read-only course workspace awareness.
                 </div>
               </button>
               <button
@@ -427,15 +503,86 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             <div className="space-y-3 p-4 rounded-xl bg-violet-950/20 border border-violet-500/30">
               <div className="flex items-center gap-2 text-violet-300 text-xs font-semibold">
                 <Sparkles className="w-4 h-4 text-violet-400 shrink-0" />
-                <span>Connected to Local Antigravity Engine</span>
+                <span>Connected to Local Antigravity CLI (`agy`)</span>
               </div>
               <p className="text-[11px] text-zinc-300 leading-relaxed">
-                Proof evaluations are dispatched directly to your active Antigravity session. It audits mathematical rigor against the full LaTeX textbook definitions and official benchmark solutions in your workspace.
+                Uses your local Antigravity account for Echo360 transcript distillation, manual lecture enrichment, and mathematical proof auditing — with read-only access to staged course slides, dossiers, and LaTeX chapters.
               </p>
+
+              {/* Antigravity Model Selector */}
+              <div className="space-y-1.5 pt-2 border-t border-violet-500/20">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-zinc-300 flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-violet-400" />
+                    <span>Select Antigravity Model</span>
+                  </label>
+                  <button
+                    type="button"
+                    disabled={fetchingModels || !isLocal}
+                    onClick={handleFetchAntigravityModels}
+                    className="text-[11px] text-violet-400 hover:text-violet-300 flex items-center gap-1 font-semibold cursor-pointer disabled:opacity-40"
+                    title="Query local agy CLI for live available models"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${fetchingModels ? "animate-spin" : ""}`} />
+                    <span>{fetchingModels ? "Discovering..." : "🔄 Discover CLI Models"}</span>
+                  </button>
+                </div>
+
+                {customModelMode.antigravity ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={settings.antigravityModel || ""}
+                      onChange={(e) => setSettings({ ...settings, antigravityModel: e.target.value })}
+                      placeholder="e.g. gemini-4-hydrogen-medium"
+                      className="flex-1 rounded-xl bg-zinc-950 border border-zinc-800 px-3 py-2 text-xs font-mono text-zinc-200 placeholder:text-zinc-600 focus:outline-hidden focus:border-violet-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setCustomModelMode((prev) => ({ ...prev, antigravity: false }))}
+                      className="text-[11px] text-zinc-400 hover:text-zinc-200 px-2 py-1 underline cursor-pointer"
+                    >
+                      Presets
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    <select
+                      value={settings.antigravityModel || "gemini-4-hydrogen-medium"}
+                      onChange={(e) => {
+                        if (e.target.value === "__custom__") {
+                          setCustomModelMode((prev) => ({ ...prev, antigravity: true }));
+                        } else {
+                          setSettings({ ...settings, antigravityModel: e.target.value });
+                        }
+                      }}
+                      className="w-full rounded-xl bg-zinc-950 border border-zinc-800 px-3 py-2.5 text-xs text-zinc-200 focus:outline-hidden focus:border-violet-500 cursor-pointer font-mono"
+                    >
+                      {availableAntigravityModels.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.label !== m.id ? `${m.label} (${m.id})` : m.id}
+                        </option>
+                      ))}
+                      {!availableAntigravityModels.some(
+                        (m) => m.id === (settings.antigravityModel || "gemini-4-hydrogen-medium")
+                      ) && (
+                        <option value={settings.antigravityModel || "gemini-4-hydrogen-medium"}>
+                          {settings.antigravityModel || "gemini-4-hydrogen-medium"}
+                        </option>
+                      )}
+                      <option value="__custom__">✍️ Enter Custom Model ID...</option>
+                    </select>
+                    <p className="text-[10px] text-zinc-500">
+                      Active: <code className="text-violet-400">{settings.antigravityModel || "gemini-4-hydrogen-medium"}</code>
+                    </p>
+                  </div>
+                )}
+              </div>
+
               <div className="text-[10px] text-zinc-400 bg-zinc-950/60 p-2.5 rounded-lg border border-zinc-800 font-mono space-y-1">
                 <div>✓ Zero external API keys required</div>
-                <div>✓ Live 4-pillar context assembly (Prompt, Benchmark, Definitions, Working)</div>
-                <div>✓ Direct LaTeX theorem & chapter awareness</div>
+                <div>✓ Structured JSON schema output for transcripts & proofs</div>
+                <div>✓ Read-only access to raw_files/, dossiers/, and LaTeX chapters</div>
               </div>
             </div>
           )}

@@ -8,6 +8,7 @@ import React, {
   useRef,
   useCallback
 } from "react";
+import { loadClientAiSettings, normalizeAiPayload } from "@/lib/ai-settings";
 
 export interface IngestLectureItem {
   lessonId: string;
@@ -536,38 +537,15 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
     aiSettings?: any,
     echoAudioOnly: boolean = true
   ) => {
-    // Resolve AI settings if omitted
+    // Resolve & normalize AI settings (defaults to Antigravity in Local Studio when unset)
     let resolvedAiSettings = aiSettings;
-    if (!resolvedAiSettings && typeof window !== "undefined") {
+    if (resolvedAiSettings) {
+      if (resolvedAiSettings.apiKey === undefined && resolvedAiSettings.model === undefined) {
+        resolvedAiSettings = normalizeAiPayload(resolvedAiSettings);
+      }
+    } else if (typeof window !== "undefined") {
       try {
-        const stored = localStorage.getItem("cn_ai_settings");
-        if (stored) {
-          const cfg = JSON.parse(stored);
-          resolvedAiSettings = {
-            provider: cfg.provider || "gemini",
-            apiKey:
-              cfg.provider === "gemini"
-                ? cfg.geminiKey
-                : cfg.provider === "openai"
-                ? cfg.openaiKey
-                : cfg.provider === "anthropic"
-                ? cfg.anthropicKey
-                : undefined,
-            model:
-              cfg.provider === "gemini"
-                ? cfg.geminiModel
-                : cfg.provider === "openai"
-                ? cfg.openaiModel
-                : cfg.provider === "anthropic"
-                ? cfg.anthropicModel
-                : cfg.ollamaModel,
-            geminiModel: cfg.geminiModel,
-            openaiModel: cfg.openaiModel,
-            anthropicModel: cfg.anthropicModel,
-            ollamaUrl: cfg.ollamaUrl,
-            ollamaModel: cfg.ollamaModel
-          };
-        }
+        resolvedAiSettings = normalizeAiPayload(loadClientAiSettings());
       } catch {}
     }
 

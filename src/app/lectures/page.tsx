@@ -63,6 +63,12 @@ import {
   getCourseCatalog,
   CourseCatalogItem
 } from "@/lib/pack-loader";
+import {
+  getActiveAiModel,
+  isAiSettingsConfigured,
+  loadClientAiSettings,
+  normalizeAiPayload
+} from "@/lib/ai-settings";
 import JSZip from "jszip";
 
 export default function LecturesPage() {
@@ -260,28 +266,13 @@ export default function LecturesPage() {
   useEffect(() => {
     if (typeof window !== "undefined") {
       try {
-        const stored = localStorage.getItem("cn_ai_settings");
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          const hasKey = Boolean(
-            parsed.provider === "ollama" ||
-            (parsed.provider === "gemini" && parsed.geminiKey?.trim()) ||
-            (parsed.provider === "openai" && parsed.openaiKey?.trim()) ||
-            (parsed.provider === "anthropic" && parsed.anthropicKey?.trim())
-          );
-          const activeModel =
-            parsed.provider === "gemini"
-              ? parsed.geminiModel || "gemini-2.5-flash"
-              : parsed.provider === "openai"
-              ? parsed.openaiModel || "gpt-4o-mini"
-              : parsed.provider === "anthropic"
-              ? parsed.anthropicModel || "claude-3-5-sonnet-20241022"
-              : parsed.ollamaModel || "llama3";
-
-          setAiConfigured({ configured: hasKey, provider: parsed.provider || "gemini", model: activeModel });
-        } else {
-          setAiConfigured({ configured: false, provider: "gemini", model: "gemini-2.5-flash" });
-        }
+        const local = isLocalStudio();
+        const cfg = loadClientAiSettings(local);
+        setAiConfigured({
+          configured: isAiSettingsConfigured(cfg, local),
+          provider: cfg.provider,
+          model: getActiveAiModel(cfg)
+        });
       } catch {}
     }
   }, [ingestModalOpen, isSettingsOpen]);
@@ -774,8 +765,7 @@ export default function LecturesPage() {
 
       if (autoDistillAfterPull && data.transcriptText) {
         setAutoPullProgress("Distilling high-yield intuitions with AI engine...");
-        const settingsStr = localStorage.getItem("cn_ai_settings");
-        const settings = settingsStr ? JSON.parse(settingsStr) : {};
+        const aiPayload = normalizeAiPayload(loadClientAiSettings(isLocalStudio()));
 
         const enrichRes = await fetch("/api/lectures/enrich", {
           method: "POST",
@@ -786,10 +776,7 @@ export default function LecturesPage() {
             lectureTitle: data.suggestedTitle || ingestTitle || `Week ${ingestWeek} Lecture`,
             slideText: slideText || `### Overview of ${data.suggestedTitle || "Lecture"}`,
             transcriptText: data.transcriptText,
-            provider: settings.provider || "gemini",
-            apiKey: settings.geminiKey || settings.openaiKey || settings.anthropicKey,
-            ollamaUrl: settings.ollamaUrl || "http://localhost:11434",
-            ollamaModel: settings.ollamaModel || "qwen2.5:7b-instruct"
+            ...aiPayload
           })
         });
 
@@ -1295,25 +1282,13 @@ export default function LecturesPage() {
   };
 
   const handleStartDistillationPipeline = async (withUploadedContext: boolean = true, requireAi: boolean = true) => {
-    // Check AI configuration from localStorage
-    let currentAiSettings: any = null;
-    try {
-      const stored = localStorage.getItem("cn_ai_settings");
-      if (stored) currentAiSettings = JSON.parse(stored);
-    } catch {}
-
-    const hasAiKey = Boolean(
-      currentAiSettings && (
-        currentAiSettings.provider === "ollama" ||
-        (currentAiSettings.provider === "gemini" && currentAiSettings.geminiKey?.trim()) ||
-        (currentAiSettings.provider === "openai" && currentAiSettings.openaiKey?.trim()) ||
-        (currentAiSettings.provider === "anthropic" && currentAiSettings.anthropicKey?.trim())
-      )
-    );
+    const local = isLocalStudio();
+    const currentAiSettings = loadClientAiSettings(local);
+    const hasAiKey = isAiSettingsConfigured(currentAiSettings, local);
 
     if (requireAi && !hasAiKey) {
       setAutoPullError(
-        "⚠️ No AI provider configured. Note distillation requires an AI model to extract definitions, KaTeX formulas, intuitions (🎙️), and exam traps (⚠️). Please click 'Connect AI Key' below to enter your Google Gemini API key or connect Ollama, or choose 'Save Raw Transcripts Without AI'."
+        "⚠️ No AI provider configured. Note distillation requires an AI model to extract definitions, KaTeX formulas, intuitions (🎙️), and exam traps (⚠️). Please select Antigravity (Local Studio), connect Ollama, or enter a Gemini/OpenAI/Anthropic API key, or choose 'Save Raw Transcripts Without AI'."
       );
       setIsSettingsOpen(true);
       return;
@@ -1331,7 +1306,7 @@ export default function LecturesPage() {
       courseId,
       discoveredLectures,
       requireAi,
-      currentAiSettings,
+      normalizeAiPayload(currentAiSettings),
       echoAudioOnly
     );
   };
@@ -1384,8 +1359,7 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
   const handleRunExtraction = async () => {
     setExtracting(true);
     try {
-      const settingsStr = localStorage.getItem("cn_ai_settings");
-      const settings = settingsStr ? JSON.parse(settingsStr) : {};
+      const aiPayload = normalizeAiPayload(loadClientAiSettings(isLocalStudio()));
 
       const res = await fetch("/api/lectures/enrich", {
         method: "POST",
@@ -1396,10 +1370,7 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
           lectureTitle: ingestTitle || `Week ${ingestWeek} Lecture`,
           slideText,
           transcriptText,
-          provider: settings.provider || "gemini",
-          apiKey: settings.geminiKey || settings.openaiKey || settings.anthropicKey,
-          ollamaUrl: settings.ollamaUrl || "http://localhost:11434",
-          ollamaModel: settings.ollamaModel || "qwen2.5:7b-instruct"
+          ...aiPayload
         })
       });
 

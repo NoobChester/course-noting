@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { resolveGeminiModel } from "@/lib/gemini-client";
+import { DEFAULT_ANTIGRAVITY_MODEL, runAntigravityPrompt } from "@/lib/antigravity-client";
 
 export async function POST(req: Request) {
   const startTime = Date.now();
@@ -8,12 +9,38 @@ export async function POST(req: Request) {
       provider,
       apiKey,
       model,
+      antigravityModel,
       geminiModel,
       openaiModel,
       anthropicModel,
       ollamaUrl,
       ollamaModel
     } = await req.json();
+
+    if (provider === "antigravity") {
+      const targetModel = antigravityModel || model || DEFAULT_ANTIGRAVITY_MODEL;
+      const result = await runAntigravityPrompt<{ ok: boolean; reply: string }>({
+        prompt: "Connection ping test. Reply immediately without reading workspace files. Set ok=true and reply='PONG'.",
+        model: targetModel,
+        timeoutMs: 90000,
+        schema: {
+          type: "object",
+          properties: {
+            ok: { type: "boolean" },
+            reply: { type: "string" }
+          },
+          required: ["ok", "reply"],
+          additionalProperties: false
+        }
+      });
+
+      const latencyMs = Date.now() - startTime;
+      return NextResponse.json({
+        success: Boolean(result.parsed?.ok ?? true),
+        model: `Antigravity (${result.model})`,
+        latencyMs
+      });
+    }
 
     if (provider === "gemini") {
       const key = apiKey || process.env.GEMINI_API_KEY;

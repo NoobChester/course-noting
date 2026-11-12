@@ -6,6 +6,12 @@ import { promisify } from "util";
 import matter from "gray-matter";
 import { fetchUNSWCourseOutline } from "../../courses/outline/route";
 import { resolveGeminiModel } from "@/lib/gemini-client";
+import {
+  DEFAULT_ANTIGRAVITY_MODEL,
+  LECTURE_DISTILLATION_JSON_SCHEMA,
+  resolveCourseWorkspaceDir,
+  runAntigravityPrompt
+} from "@/lib/antigravity-client";
 
 const execAsync = promisify(exec);
 
@@ -458,9 +464,10 @@ async function distillLectureWithAI(params: {
   courseContext: string;
   transcriptText: string;
   aiSettings: {
-    provider: "gemini" | "openai" | "anthropic" | "ollama";
+    provider: "antigravity" | "gemini" | "openai" | "anthropic" | "ollama";
     apiKey?: string;
     model?: string;
+    antigravityModel?: string;
     geminiModel?: string;
     openaiModel?: string;
     anthropicModel?: string;
@@ -535,7 +542,20 @@ Distill the high-yield study note JSON now:`;
   let parsedResult: any = null;
   let modelName = "";
 
-  if (provider === "gemini") {
+  if (provider === "antigravity") {
+    const targetModel = aiSettings.antigravityModel || aiSettings.model || DEFAULT_ANTIGRAVITY_MODEL;
+    const workspaceDir = await resolveCourseWorkspaceDir(courseId, BASE_DIR);
+    const agyRes = await runAntigravityPrompt<any>({
+      prompt: userPrompt,
+      systemInstruction: systemPrompt,
+      model: targetModel,
+      workspaceDir,
+      schema: LECTURE_DISTILLATION_JSON_SCHEMA,
+      timeoutMs: 240000
+    });
+    modelName = `Antigravity (${agyRes.model})`;
+    parsedResult = agyRes.parsed;
+  } else if (provider === "gemini") {
     const key = aiSettings.apiKey || process.env.GEMINI_API_KEY;
     if (!key) throw new Error("Missing Google Gemini API key. Please configure your key in AI Settings.");
 
@@ -1547,6 +1567,7 @@ export async function POST(req: NextRequest) {
       let aiModelUsed: string | null = null;
 
       const hasAiConfigured = aiSettings && (
+        aiSettings.provider === "antigravity" ||
         aiSettings.provider === "ollama" ||
         (aiSettings.provider === "gemini" && (aiSettings.apiKey?.trim() || process.env.GEMINI_API_KEY)) ||
         (aiSettings.provider === "openai" && (aiSettings.apiKey?.trim() || process.env.OPENAI_API_KEY)) ||
@@ -1579,7 +1600,7 @@ export async function POST(req: NextRequest) {
         if (requireAi && autoDistill) {
           return NextResponse.json(
             {
-              error: "No AI provider configured. Please open AI Settings to enter a Google Gemini API key or connect Ollama to distill notes.",
+              error: "No AI provider configured. Please open AI Settings to select Antigravity (Local Studio), connect Ollama, or enter a Gemini/OpenAI/Anthropic API key to distill notes.",
               needsAiConfig: true
             },
             { status: 400 }

@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { LectureInsight, QuestionHintInsight } from "@/lib/types";
 import { resolveGeminiModel } from "@/lib/gemini-client";
+import {
+  DEFAULT_ANTIGRAVITY_MODEL,
+  LECTURE_DISTILLATION_JSON_SCHEMA,
+  resolveCourseWorkspaceDir,
+  runAntigravityPrompt
+} from "@/lib/antigravity-client";
 
 function pruneTranscriptNoise(rawText: string): string {
   const lines = rawText.split("\n");
@@ -48,6 +54,7 @@ export async function POST(req: NextRequest) {
       provider = "gemini",
       apiKey,
       model,
+      antigravityModel,
       geminiModel,
       openaiModel,
       anthropicModel,
@@ -110,7 +117,19 @@ Extract the high-yield value JSON now:`;
 
     let parsedResult: any = null;
 
-    if (provider === "gemini") {
+    if (provider === "antigravity") {
+      const targetModel = antigravityModel || model || DEFAULT_ANTIGRAVITY_MODEL;
+      const workspaceDir = await resolveCourseWorkspaceDir(courseId);
+      const agyRes = await runAntigravityPrompt<any>({
+        prompt: userPrompt,
+        systemInstruction: systemPrompt,
+        model: targetModel,
+        workspaceDir,
+        schema: LECTURE_DISTILLATION_JSON_SCHEMA,
+        timeoutMs: 240000
+      });
+      parsedResult = agyRes.parsed;
+    } else if (provider === "gemini") {
       const key = apiKey || process.env.GEMINI_API_KEY;
       if (!key) return NextResponse.json({ error: "Missing Gemini API key" }, { status: 400 });
 

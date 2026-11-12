@@ -3,12 +3,12 @@ import { getQuestionById, getConceptBySlug } from "@/lib/file-service";
 import { saveUserQuestionData } from "@/lib/user-service";
 import { Concept, ProofReviewResult } from "@/lib/types";
 import { resolveGeminiModel } from "@/lib/gemini-client";
-import { execFile } from "child_process";
-import { promisify } from "util";
-import path from "path";
-
-const execFileAsync = promisify(execFile);
-const REPO_ROOT = process.cwd();
+import {
+  DEFAULT_ANTIGRAVITY_MODEL,
+  PROOF_REVIEW_JSON_SCHEMA,
+  resolveCourseWorkspaceDir,
+  runAntigravityPrompt
+} from "@/lib/antigravity-client";
 
 function extractJson(text: string): any {
   let cleaned = text.trim();
@@ -32,6 +32,7 @@ export async function POST(req: Request) {
       apiKey,
       provider = "gemini",
       model,
+      antigravityModel,
       geminiModel,
       openaiModel,
       anthropicModel,
@@ -103,32 +104,17 @@ Audit the student's proof and output the JSON review:`;
     let reviewResult: ProofReviewResult;
 
     if (provider === "antigravity") {
-      // Local Antigravity Bridge Provider
-      const bridgeScript = path.join(REPO_ROOT, "scripts", "course_bridge.py");
-      try {
-        const { stdout } = await execFileAsync("python", [
-          bridgeScript,
-          "--workspace",
-          path.join(REPO_ROOT, "courses", courseId.toUpperCase()),
-          "audit-proof",
-          "--question",
-          questionId,
-          "--solution",
-          studentSolution
-        ]);
-        reviewResult = extractJson(stdout);
-      } catch (e) {
-        // Fallback: evaluate locally with structured heuristic
-        reviewResult = {
-          verdict: "Correct with Minor Gaps",
-          score: 8,
-          summary: "Proof structure is mathematically sound. Checked hypotheses and derivations against textbook definitions.",
-          missingHypotheses: [],
-          logicalGaps: [],
-          strengths: ["Clear step progression", "Proper notation"],
-          suggestedPatch: studentSolution.trim()
-        };
-      }
+      const targetModel = antigravityModel || model || DEFAULT_ANTIGRAVITY_MODEL;
+      const workspaceDir = await resolveCourseWorkspaceDir(courseId);
+      const agyRes = await runAntigravityPrompt<ProofReviewResult>({
+        prompt: userPrompt,
+        systemInstruction: systemPrompt,
+        model: targetModel,
+        workspaceDir,
+        schema: PROOF_REVIEW_JSON_SCHEMA,
+        timeoutMs: 180000
+      });
+      reviewResult = agyRes.parsed;
     } else if (provider === "gemini") {
       const key = apiKey || process.env.GEMINI_API_KEY;
       if (!key) {

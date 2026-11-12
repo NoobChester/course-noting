@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { listAvailableGeminiModels } from "@/lib/gemini-client";
+import { FALLBACK_ANTIGRAVITY_MODELS, listAntigravityModels } from "@/lib/antigravity-client";
 
 export async function GET(req: NextRequest) {
   try {
@@ -7,6 +8,27 @@ export async function GET(req: NextRequest) {
     const provider = searchParams.get("provider") || "gemini";
     const apiKey = searchParams.get("key") || "";
     const ollamaUrl = searchParams.get("url") || "http://localhost:11434";
+
+    if (provider === "antigravity") {
+      try {
+        const modelOptions = await listAntigravityModels();
+        return NextResponse.json({
+          success: true,
+          provider: "antigravity",
+          models: modelOptions.map((m) => m.id),
+          modelOptions
+        });
+      } catch (err: any) {
+        console.warn("Could not query agy models:", err?.message || err);
+        return NextResponse.json({
+          success: true,
+          provider: "antigravity",
+          fallback: true,
+          models: FALLBACK_ANTIGRAVITY_MODELS.map((m) => m.id),
+          modelOptions: FALLBACK_ANTIGRAVITY_MODELS
+        });
+      }
+    }
 
     if (provider === "gemini") {
       const key = apiKey || process.env.GEMINI_API_KEY || "";

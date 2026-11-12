@@ -163,6 +163,7 @@ export type AIProvider = "antigravity" | "gemini" | "openai" | "anthropic" | "ol
 
 export interface AISettings {
   provider: AIProvider;
+  antigravityModel?: string;
   geminiKey?: string;
   geminiModel?: string;
   openaiKey?: string;
