@@ -1,0 +1,30 @@
+% =====================================================================
+%  templates/coursebook/macros.tex -- Standardized Mathematical Notation
+% =====================================================================
+
+% Number Systems
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\Q}{\mathbb{Q}}
+\newcommand{\C}{\mathbb{C}}
+\newcommand{\F}{\mathbb{F}}
+\newcommand{\Z}{\mathbb{Z}}
+
+% Common Mathematical Delimiters
+\DeclarePairedDelimiter{\abs}{\lvert}{\rvert}
+\DeclarePairedDelimiter{\norm}{\lVert}{\rVert}
+\DeclarePairedDelimiterX{\ip}[2]{\langle}{\rangle}{#1,#2}
+\DeclarePairedDelimiterX{\set}[2]{\{}{\}}{#1 \;:\; #2}
+
+% Common Operators
+\DeclareMathOperator{\Span}{span}
+\DeclareMathOperator{\kernel}{ker}
+\DeclareMathOperator{\ran}{ran}
+\DeclareMathOperator{\dist}{dist}
+\DeclareMathOperator{\supp}{supp}
+
+% Greek & Analysis shortcuts
+\newcommand{\eps}{\varepsilon}
+\newcommand{\dx}{\,dx}
+\newcommand{\dt}{\,dt}
+\newcommand{\dmu}{\,d\mu}

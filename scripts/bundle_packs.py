@@ -155,6 +155,8 @@ def bundle_course(parent_dir, course_folder):
 
     course_id = course_meta.get("id", course_folder.lower()).lower()
     course_meta["id"] = course_id
+    if "code" not in course_meta:
+        course_meta["code"] = course_folder.upper()
 
     # 1. Parse Concepts (Layer 1)
     concepts = []
@@ -277,7 +279,7 @@ def bundle_course(parent_dir, course_folder):
     with open(lec_file, "w", encoding="utf-8") as f:
         json.dump(lecture_pack, f, indent=2)
 
-    print(f"Bundled {course_meta['code']}:")
+    print(f"Bundled {course_meta.get('code', course_folder)}:")
     print(f"  -> Layer 1 (Base): {len(questions)} questions, {len(concepts)} concepts -> {base_file}")
     print(f"  -> Layer 2 (Lectures): {len(lectures)} lectures, {len(all_insights)} insights -> {lec_file}")
 

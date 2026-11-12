@@ -1,0 +1,154 @@
+% =====================================================================
+%  templates/coursebook/preamble.sty -- Universal STEM Coursebook Styling
+%  A4, two-sided, wide outer margin for handwriting, greyscale-safe boxes.
+% =====================================================================
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{preamble}[Universal Coursebook Styling]
+
+% ---------- Page geometry ------------------------------------------------
+\RequirePackage[a4paper,twoside,
+  top=24mm,bottom=26mm,inner=25mm,outer=37mm,
+  marginparwidth=27mm,marginparsep=4mm,
+  headheight=14pt,headsep=8mm,footskip=11mm]{geometry}
+
+% ---------- Fonts & Math --------------------------------------------------
+\RequirePackage{amsmath,amssymb,mathtools}
+\RequirePackage{newpxtext}
+\RequirePackage{newpxmath}
+\RequirePackage[scaled=0.86]{beramono}
+\RequirePackage{microtype}
+\linespread{1.06}
+
+% ---------- General packages ---------------------------------------------
+\RequirePackage[dvipsnames]{xcolor}
+\RequirePackage{graphicx}
+\RequirePackage{booktabs,tabularx,array}
+\RequirePackage{multicol}
+\RequirePackage{enumitem}
+\RequirePackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,calc,shapes.geometric,patterns}
+\RequirePackage[most]{tcolorbox}
+\RequirePackage{fancyhdr}
+\RequirePackage{titlesec}
+\RequirePackage{needspace}
+\RequirePackage[hidelinks,bookmarksnumbered]{hyperref}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.55em plus 0.2em minus 0.1em}
+\setlist{itemsep=0.25em,topsep=0.3em,parsep=0.15em}
+\setlist[enumerate,1]{label=\textbf{\arabic*.},leftmargin=*}
+\setlist[description]{font=\normalfont\bfseries,leftmargin=1.2em,labelindent=0pt}
+\renewcommand{\arraystretch}{1.25}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\clubpenalty=10000 \widowpenalty=10000 \displaywidowpenalty=10000
+
+% ---------- Colours (Greyscale-distinct palette) -------------------------
+\definecolor{defcol}{HTML}{1F4E79}   % deep blue  -> dark grey
+\definecolor{thmcol}{HTML}{2E2E2E}   % near black
+\definecolor{solcol}{HTML}{2F6B3A}   % deep green -> mid-dark grey
+\definecolor{pitcol}{HTML}{661111}   % deep red   -> dark grey
+\definecolor{probcol}{HTML}{4A3B18}  % dark umber
+\definecolor{flagcol}{HTML}{902800}
+
+% ---------- Section headings ----------------------------------------------
+\titleformat{\section}{\needspace{6\baselineskip}\Large\bfseries\color{defcol}}{\thesection}{0.7em}{}[{\color{defcol}\titlerule[0.6pt]}]
+\titlespacing*{\section}{0pt}{1.6em}{0.9em}
+\titleformat{\subsection}{\needspace{4\baselineskip}\large\bfseries}{\thesubsection}{0.6em}{}
+\titlespacing*{\subsection}{0pt}{1.2em}{0.4em}
+\titleformat{\subsubsection}{\needspace{3\baselineskip}\normalsize\bfseries\itshape}{}{0em}{}
+\titlespacing*{\subsubsection}{0pt}{0.9em}{0.2em}
+\setcounter{secnumdepth}{2}
+\setcounter{tocdepth}{1}
+
+% ---------- Header / footer -----------------------------------------------
+\newcommand{\chaptershort}{}
+\newcommand{\courseheader}{COURSE}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[LE]{\small\scshape\courseheader}
+\fancyhead[RO]{\small\scshape\chaptershort}
+\fancyfoot[LE,RO]{\small\thepage}
+\renewcommand{\headrulewidth}{0.3pt}
+\fancypagestyle{plain}{\fancyhf{}\fancyfoot[LE,RO]{\small\thepage}\renewcommand{\headrulewidth}{0pt}}
+
+% ---------- 7-Element Pedagogical Boxes -----------------------------------
+\tcbset{
+  sbase/.style={enhanced,breakable,sharp corners,before skip=0.8em,after skip=0.8em,
+    left=2.5mm,right=2.5mm,top=1.4mm,bottom=1.4mm,fonttitle=\bfseries,parbox=false},
+}
+
+% 1. Definition (solid colored left rule)
+\newtcolorbox{defn}[1][]{sbase,colback=defcol!6,colframe=defcol,
+  boxrule=0pt,leftrule=2.6pt,
+  title={Definition\if\relax\detokenize{#1}\relax\else\ (#1)\fi},
+  coltitle=defcol,colbacktitle=defcol!6,attach title to upper={\par},
+  fonttitle=\bfseries\scshape}
+
+% 2. Theorem (solid dark framed box)
+\newtcolorbox{thm}[1][]{sbase,colback=white,colframe=thmcol,boxrule=0.7pt,
+  colbacktitle=thmcol,coltitle=white,
+  title={Theorem\if\relax\detokenize{#1}\relax\else\ (#1)\fi}}
+
+% Generic named result (Proposition, Lemma, Corollary...)
+\newtcolorbox{result}[1]{sbase,colback=white,colframe=thmcol,boxrule=0.7pt,
+  colbacktitle=thmcol,coltitle=white,title={#1}}
+
+% Worked proof inside notes
+\newtcolorbox{proofbox}[1][Proof]{sbase,colback=white,frame hidden,
+  borderline west={1.4pt}{0pt}{thmcol!70},
+  title={#1},coltitle=thmcol,colbacktitle=white,attach title to upper={\par},fonttitle=\bfseries\itshape}
+
+% Key idea / summary band
+\newtcolorbox{keyidea}[1][Key idea]{sbase,colback=black!4,colframe=black!4,boxrule=0pt,
+  title={#1},coltitle=black,attach title to upper={\par},fonttitle=\bfseries\scshape}
+
+% 3. Proof Battle Plan: dotted border, clear attack strategy outline
+\newtcolorbox{battleplan}[1][Attack Strategy]{sbase,colback=white,frame hidden,
+  borderline={0.9pt}{0pt}{thmcol,densely dotted},
+  title={\textsc{Proof Battle Plan}\if\relax\detokenize{#1}\relax\else: #1\fi},
+  coltitle=thmcol,colbacktitle=black!3,attach title to upper={\par},fonttitle=\bfseries}
+
+% 4. Lecturer's Intuition Callout: authentic transcript voice
+\newtcolorbox{lecturerbox}[1][]{sbase,arc=1.5mm,colback=black!3,colframe=black!60,boxrule=0.7pt,
+  title={\textbf{Lecturer's Intuition}\if\relax\detokenize{#1}\relax\else\ (#1)\fi},
+  coltitle=black,colbacktitle=black!10,attach title to upper={\par},
+  fonttitle=\bfseries\small}
+
+% 5. Exam Trap / Warning: dashed red-tinted frame
+\newtcolorbox{exambox}[1][]{sbase,colback=pitcol!5,frame hidden,
+  borderline={0.8pt}{0pt}{pitcol,dashed},
+  title={\raisebox{-0.1ex}{\tikz[baseline=-0.6ex]{\draw[pitcol,line width=0.8pt,fill=pitcol!15] (0,0)--(0.3,0.52)--(0.6,0)--cycle;\node[pitcol,font=\bfseries\tiny] at (0.3,0.17){!};}}\ \textbf{Exam Trap / Warning}\if\relax\detokenize{#1}\relax\else: #1\fi},
+  coltitle=pitcol,colbacktitle=pitcol!5,attach title to upper={\par}}
+
+% 6. Tutorial Companion Callout: double left rule, tactical hint for tutorial problem
+\newtcolorbox{tutecompanion}[1][]{sbase,colback=probcol!4,frame hidden,
+  borderline west={2.2pt}{0pt}{probcol},
+  title={\textsc{Tutorial Companion}\if\relax\detokenize{#1}\relax\else: #1\fi},
+  coltitle=probcol,colbacktitle=probcol!4,attach title to upper={\par},
+  fonttitle=\bfseries\small}
+
+% ---------- Margin Note Helpers -------------------------------------------
+\newcommand{\tuteref}[1]{\leavevmode\marginpar{\raggedright\scriptsize\color{probcol}\textbf{Tutorial Sheet:}\\#1}}
+\newcommand{\examnote}[1]{\leavevmode\marginpar{\raggedright\scriptsize\color{pitcol}\textbf{Exam Alert:}\\#1}}
+
+% ---------- Chapter Header -----------------------------------------------
+\newcounter{coursechapter}
+\newcommand{\chapterbegin}[4]{%
+  \cleardoublepage
+  \refstepcounter{coursechapter}%
+  \setcounter{section}{0}%
+  \renewcommand{\chaptershort}{#2}%
+  \thispagestyle{plain}%
+  \phantomsection\addcontentsline{toc}{section}{\protect\numberline{\arabic{coursechapter}}#1}%
+  \begin{tcolorbox}[enhanced,sharp corners,colback=defcol,colframe=defcol,coltext=white,
+      left=5mm,right=5mm,top=5mm,bottom=5mm,boxrule=0pt]
+    {\small\scshape\color{white!80!defcol}Chapter \arabic{coursechapter} \textperiodcentered\ #3\par}
+    \vspace{2mm}
+    {\LARGE\bfseries #1\par}
+    \vspace{1mm}
+    {\normalsize\itshape #4\par}
+  \end{tcolorbox}
+  \vspace{3mm}
+}
+
+\endinput

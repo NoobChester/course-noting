@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
+import JSZip from "jszip";
 
 const BASE_DIR = process.cwd();
 const COURSES_BASE_DIR = path.join(BASE_DIR, "courses");
@@ -86,22 +87,9 @@ export async function POST(req: NextRequest) {
     }
 
     // Try auto-detecting week from filename if week is not explicitly set
-    if (week === "all") {
-      const weekMatch = file.name.match(/(?:week|wk|w)[\s_-]*(\d+)/i);
-      if (weekMatch) {
-        week = parseInt(weekMatch[1], 10);
-      }
-    }
-
     const ext = path.extname(file.name) || ".txt";
-    const safeBaseName = path.basename(file.name, ext).replace(/[^a-zA-Z0-9_-]/g, "_");
-    const targetFileName = `${safeBaseName}_${Date.now()}${ext}`;
-    const targetFilePath = path.join(targetDir, targetFileName);
-
+    const isZip = ext.toLowerCase() === ".zip" || file.type.includes("zip") || file.name.toLowerCase().endsWith(".zip");
     const buffer = Buffer.from(await file.arrayBuffer());
-    await fs.writeFile(targetFilePath, buffer);
-
-    const extractedText = extractTextFromBuffer(buffer, ext);
 
     // Update course_content.json manifest
     const manifestPath = path.join(COURSES_BASE_DIR, cleanCourse, "course_content.json");
@@ -110,6 +98,89 @@ export async function POST(req: NextRequest) {
       const raw = await fs.readFile(manifestPath, "utf-8");
       manifest = JSON.parse(raw);
     } catch {}
+
+    if (isZip) {
+      const zip = await JSZip.loadAsync(buffer);
+      const createdItems: any[] = [];
+      const VALID_EXTS = [
+        ".pdf", ".tex", ".latex", ".md", ".txt", ".docx", ".vtt", ".srt",
+        ".csv", ".json", ".png", ".jpg", ".jpeg", ".html", ".py", ".ipynb"
+      ];
+
+      for (const [relPath, zipEntry] of Object.entries(zip.files)) {
+        if (zipEntry.dir) continue;
+        if (relPath.startsWith("__MACOSX") || path.basename(relPath).startsWith(".")) continue;
+
+        const entryExt = path.extname(zipEntry.name).toLowerCase();
+        if (!VALID_EXTS.includes(entryExt)) continue;
+
+        const entryBuffer = await zipEntry.async("nodebuffer");
+        const baseName = path.basename(zipEntry.name);
+        const safeBaseName = path.basename(zipEntry.name, entryExt).replace(/[^a-zA-Z0-9_-]/g, "_");
+        const entryTargetFileName = `${safeBaseName}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}${entryExt}`;
+        const entryTargetFilePath = path.join(targetDir, entryTargetFileName);
+
+        await fs.writeFile(entryTargetFilePath, entryBuffer);
+
+        // Detect week from entry relative path or filename if not specified
+        let entryWeek: number | "all" = week;
+        if (entryWeek === "all") {
+          const weekMatch = zipEntry.name.match(/(?:week|wk|w)[\s_-]*(\d+)/i) || zipEntry.name.match(/tut(?:orial)?[\s_-]*0?(\d+)/i);
+          if (weekMatch) {
+            entryWeek = parseInt(weekMatch[1], 10);
+          }
+        }
+
+        const extractedText = extractTextFromBuffer(entryBuffer, entryExt);
+
+        const newItem = {
+          id: `content-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+          originalName: baseName,
+          savedFileName: entryTargetFileName,
+          relativePath: path.relative(path.join(COURSES_BASE_DIR, cleanCourse), entryTargetFilePath).replace(/\\/g, "/"),
+          category: safeCategory,
+          categoryName,
+          week: entryWeek,
+          size: entryBuffer.length,
+          mimeType: entryExt === ".pdf" ? "application/pdf" : "application/octet-stream",
+          uploadedAt: new Date().toISOString(),
+          textSnippet: extractedText ? extractedText.slice(0, 5000) : ""
+        };
+
+        manifest.items.push(newItem);
+        createdItems.push(newItem);
+      }
+
+      if (createdItems.length > 0) {
+        manifest.lastUpdated = new Date().toISOString();
+        await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2), "utf-8");
+      }
+
+      return NextResponse.json({
+        success: true,
+        isZip: true,
+        items: createdItems,
+        item: createdItems[0] || null,
+        count: createdItems.length,
+        totalCount: manifest.items.length
+      });
+    }
+
+    // Try auto-detecting week from filename if week is not explicitly set
+    if (week === "all") {
+      const weekMatch = file.name.match(/(?:week|wk|w)[\s_-]*(\d+)/i);
+      if (weekMatch) {
+        week = parseInt(weekMatch[1], 10);
+      }
+    }
+
+    const safeBaseName = path.basename(file.name, ext).replace(/[^a-zA-Z0-9_-]/g, "_");
+    const targetFileName = `${safeBaseName}_${Date.now()}${ext}`;
+    const targetFilePath = path.join(targetDir, targetFileName);
+
+    await fs.writeFile(targetFilePath, buffer);
+
+    const extractedText = extractTextFromBuffer(buffer, ext);
 
     const newItem = {
       id: `content-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,

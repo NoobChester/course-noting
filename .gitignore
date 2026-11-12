@@ -59,6 +59,9 @@ __pycache__/
 .echo360_session/
 *.pdf
 
+# Staged course assets from external course workspaces
+/public/courses/*
+
 # Blank Slate Course Architecture:
 # Local university courses stay 100% on local machine and are NEVER committed to git
 /courses/*

@@ -43,6 +43,7 @@ export async function fetchUNSWCourseOutline(courseCode: string, requestedYear?:
   closestYear?: string;
   isClosestMatch?: boolean;
   availableYears?: string[];
+  availableTerms?: string[];
   error?: string;
 }> {
   const cleanCode = courseCode.toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -107,9 +108,19 @@ export async function fetchUNSWCourseOutline(courseCode: string, requestedYear?:
     return {
       outline: null,
       availableYears,
+      availableTerms: [],
       error: `No published UNSW Course Outline found for ${cleanCode} in ${requestedYear || currentYear}.`
     };
   }
+
+  // Extract all existing terms for this course in this year
+  const availableTerms: string[] = Array.from(
+    new Set(
+      matches
+        .map((m: any) => m.integrat_term || m.integrat_teachingperiod)
+        .filter(Boolean)
+    )
+  );
 
   // Filter by term if specified
   let selected = matches[0];
@@ -200,7 +211,8 @@ export async function fetchUNSWCourseOutline(courseCode: string, requestedYear?:
     outline,
     closestYear,
     isClosestMatch,
-    availableYears
+    availableYears: availableYears.length > 0 ? availableYears : [targetYear],
+    availableTerms: availableTerms.length > 0 ? availableTerms : [outline.term]
   };
 }
 
@@ -226,7 +238,9 @@ export async function GET(req: NextRequest) {
           return NextResponse.json({
             success: true,
             cached: true,
-            outline: cached
+            outline: cached,
+            availableYears: [cached.year],
+            availableTerms: [cached.term]
           });
         }
       } catch {}
@@ -238,7 +252,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(
         {
           error: result.error || "Course outline not found",
-          availableYears: result.availableYears
+          availableYears: result.availableYears,
+          availableTerms: result.availableTerms
         },
         { status: 404 }
       );
@@ -281,7 +296,8 @@ export async function GET(req: NextRequest) {
       outline: result.outline,
       isClosestMatch: result.isClosestMatch,
       closestYear: result.closestYear,
-      availableYears: result.availableYears
+      availableYears: result.availableYears,
+      availableTerms: result.availableTerms
     });
   } catch (err: any) {
     console.error("Error in /api/courses/outline GET:", err);
