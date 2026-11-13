@@ -11,6 +11,8 @@ import {
   Volume2,
   Sparkles,
   Play,
+  Pause,
+  X,
   RotateCcw,
   Library,
   Search,
@@ -90,11 +92,30 @@ export function PipelineStagesPanel({
   const {
     session,
     isRunning,
+    isPaused,
+    setDockOpen,
+    pauseQueue,
+    resumeQueue,
+    cancelQueue,
+    clearSession,
     startBatchDownload,
     startDistillationQueue,
     retryFailedItems,
     subscribeToNoteUpdates
   } = useBackgroundIngest();
+
+  const activeCourseSession =
+    session &&
+    (!courseId || session.courseId.toLowerCase() === courseId.toLowerCase())
+      ? session
+      : null;
+
+  // Keep the small corner dock collapsed while viewing the full-page pipeline workspace
+  useEffect(() => {
+    if (activeCourseSession) {
+      setDockOpen(false);
+    }
+  }, [activeCourseSession?.id, activeCourseSession, setDockOpen]);
 
   // Stage 1: Course PDFs & Extraction state
   const [manifestItems, setManifestItems] = useState<CourseManifestItem[]>([]);
@@ -523,7 +544,7 @@ export function PipelineStagesPanel({
           <div className="flex items-center gap-2">
             <Layers className="w-5 h-5 text-violet-400" />
             <h2 className="text-base sm:text-lg font-black text-white">
-              {courseId.toUpperCase()} — Resumable 4-Stage Pipeline
+              {courseId ? courseId.toUpperCase() : "Course Discovery"} — Resumable 4-Stage Pipeline
             </h2>
           </div>
           <p className="text-xs text-zinc-400 mt-1">
@@ -531,16 +552,130 @@ export function PipelineStagesPanel({
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => syncDiskStatus()}
-          disabled={syncingDisk}
-          className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 disabled:opacity-60 text-zinc-200 text-xs font-semibold flex items-center gap-1.5 border border-zinc-700 transition cursor-pointer shrink-0"
-        >
-          <FolderSync className={`w-3.5 h-3.5 text-cyan-400 ${syncingDisk ? "animate-spin" : ""}`} />
-          <span>{syncingDisk ? "Syncing Disk..." : "Refresh Disk State"}</span>
-        </button>
+        {courseId && (
+          <button
+            type="button"
+            onClick={() => syncDiskStatus()}
+            disabled={syncingDisk}
+            className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 disabled:opacity-60 text-zinc-200 text-xs font-semibold flex items-center gap-1.5 border border-zinc-700 transition cursor-pointer shrink-0"
+          >
+            <FolderSync className={`w-3.5 h-3.5 text-cyan-400 ${syncingDisk ? "animate-spin" : ""}`} />
+            <span>{syncingDisk ? "Syncing Disk..." : "Refresh Disk State"}</span>
+          </button>
+        )}
       </div>
+
+      {/* Full-Width Live Queue Progress & Recovery Controls (replaces compressed corner popup) */}
+      {activeCourseSession && (
+        <div
+          className={`p-4 sm:p-5 rounded-2xl border space-y-3 shadow-lg ${
+            activeCourseSession.status === "completed"
+              ? "bg-emerald-950/25 border-emerald-500/40"
+              : activeCourseSession.errorCount > 0
+              ? "bg-rose-950/20 border-rose-500/40"
+              : isPaused
+              ? "bg-amber-950/20 border-amber-500/40"
+              : "bg-indigo-950/25 border-indigo-500/40"
+          }`}
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="min-w-0 space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="px-2 py-0.5 rounded-md bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 font-mono text-[11px] font-bold uppercase">
+                  {activeCourseSession.phase === "downloading"
+                    ? "Stage 2 Running"
+                    : activeCourseSession.phase === "distilling"
+                    ? "Stage 3 Distilling"
+                    : activeCourseSession.status}
+                </span>
+                <span className="text-sm font-bold text-white truncate">
+                  {activeCourseSession.currentLectureTitle || "Queue Status"}
+                </span>
+                <span className="text-xs font-mono text-zinc-300">
+                  {activeCourseSession.completedCount} / {Math.max(1, activeCourseSession.totalCount)} ({activeCourseSession.progressPercent}%)
+                </span>
+              </div>
+              <p className="text-xs text-zinc-300">
+                {activeCourseSession.currentStage || "Processing..."}
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              {isRunning && !isPaused ? (
+                <button
+                  type="button"
+                  onClick={pauseQueue}
+                  className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-amber-300 text-xs font-bold flex items-center gap-1.5 border border-zinc-700 cursor-pointer"
+                >
+                  <Pause className="w-3.5 h-3.5" />
+                  <span>Pause</span>
+                </button>
+              ) : isPaused ? (
+                <button
+                  type="button"
+                  onClick={resumeQueue}
+                  className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Play className="w-3.5 h-3.5" />
+                  <span>Resume</span>
+                </button>
+              ) : null}
+
+              {!isRunning && activeCourseSession.lectures.some((l) => l.status === "error") && (
+                <button
+                  type="button"
+                  onClick={retryFailedItems}
+                  className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>
+                    Retry Failed ({activeCourseSession.lectures.filter((l) => l.status === "error").length})
+                  </span>
+                </button>
+              )}
+
+              {isRunning ? (
+                <button
+                  type="button"
+                  onClick={cancelQueue}
+                  className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-rose-300 text-xs font-semibold border border-zinc-700 cursor-pointer"
+                >
+                  Cancel
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={clearSession}
+                  title="Dismiss banner"
+                  className="p-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border border-zinc-800 cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="w-full h-2.5 bg-zinc-900 rounded-full overflow-hidden border border-zinc-800">
+            <div
+              className={`h-full transition-all duration-300 ${
+                activeCourseSession.status === "completed"
+                  ? "bg-emerald-500"
+                  : isPaused
+                  ? "bg-amber-400"
+                  : "bg-gradient-to-r from-indigo-500 to-cyan-400"
+              }`}
+              style={{ width: `${activeCourseSession.progressPercent}%` }}
+            />
+          </div>
+
+          {activeCourseSession.lastError &&
+            activeCourseSession.lectures.some((l) => l.status === "error") && (
+              <div className="p-2.5 rounded-xl bg-rose-950/50 border border-rose-500/40 text-rose-200 text-xs">
+                <strong>Latest error:</strong> {activeCourseSession.lastError}
+              </div>
+            )}
+        </div>
+      )}
 
       {/* STAGE 1: Course PDFs & Extraction */}
       <section className="p-5 rounded-2xl bg-zinc-900/70 border border-zinc-800 space-y-4">
@@ -664,7 +799,7 @@ export function PipelineStagesPanel({
               </span>
             </button>
             {showAllFiles && (
-              <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2 max-h-52 overflow-y-auto pr-1">
+              <div className="mt-2 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
                 {manifestItems.map((m) => (
                   <div
                     key={m.id}
@@ -942,9 +1077,9 @@ export function PipelineStagesPanel({
           </div>
         )}
 
-        {/* Per-Lecture Unified Resumable List */}
+        {/* Per-Lecture Unified Resumable Full-Page List */}
         {discoveredLectures.length > 0 && (
-          <div className="space-y-2 max-h-[480px] overflow-y-auto pr-1">
+          <div className="space-y-2.5">
             {discoveredLectures.map((l) => {
               const hasMedia = Boolean(l.hasTranscript || l.audioDownloaded);
               const isCompleteFull = l.status === "done" && !l.pdfOnly;

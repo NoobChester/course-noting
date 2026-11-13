@@ -566,9 +566,17 @@ export default function LecturesPage() {
 
   useEffect(() => {
     setIsLocal(isLocalStudio());
-    const savedCourse = getActiveCourseId();
+    const params =
+      typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+    const urlCourse = params?.get("course")?.trim().toLowerCase();
+    const urlTab = params?.get("tab");
+    const savedCourse = urlCourse || getActiveCourseId();
+
     if (savedCourse) {
       setCourseId(savedCourse);
+      if (urlCourse) {
+        setActiveCourseId(savedCourse);
+      }
       loadCourseData(savedCourse);
     } else {
       setLoading(false);
@@ -582,15 +590,19 @@ export default function LecturesPage() {
 
     checkEchoSession(true);
 
-    // Auto-discover the course from the connected cookie when ingest modal opens
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get("addCourse") === "true" || params.get("openIngest") === "true") {
-        setIngestModalOpen(true);
+    if (params) {
+      if (
+        urlTab === "pipeline" ||
+        params.get("addCourse") === "true" ||
+        params.get("openIngest") === "true"
+      ) {
+        setWorkspaceTab("pipeline");
         setCourseOutline(null);
         setSectionUrl("");
-        setDiscoveredLectures([]);
         setAutoPullError(null);
+      } else if (urlTab === "notebook" && savedCourse) {
+        setWorkspaceTab("notebook");
+        loadNotebookData(savedCourse);
       }
     }
   }, []);
@@ -1723,7 +1735,13 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+    <div
+      className={
+        workspaceTab === "pipeline"
+          ? "max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-10 py-6 space-y-6"
+          : "max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6"
+      }
+    >
       {/* Header Bar */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-6 border-b border-zinc-800 gap-4">
         <div>
@@ -1771,20 +1789,13 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
 
           <button
             type="button"
-            onClick={() => {
-              if (courseId) {
-                setWorkspaceTab("pipeline");
-              } else {
-                setIngestTab("echo360");
-                setIngestModalOpen(true);
-              }
-            }}
+            onClick={() => setWorkspaceTab("pipeline")}
             className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 shadow-lg cursor-pointer ${
               isLocal
                 ? "bg-violet-600 hover:bg-violet-500 text-white shadow-violet-950/50"
                 : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
             }`}
-            title="Open the resumable 4-stage Echo360 & PDF pipeline"
+            title="Open the full-page resumable 4-stage Echo360 & PDF pipeline"
           >
             <Sparkles className="w-4 h-4 text-violet-200" />
             <span>⚡ 4-Stage Pipeline / Auto-Pull</span>
@@ -1812,14 +1823,7 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => {
-                if (courseId) {
-                  setWorkspaceTab("pipeline");
-                } else {
-                  setIngestTab("echo360");
-                  setIngestModalOpen(true);
-                }
-              }}
+              onClick={() => setWorkspaceTab("pipeline")}
               className="px-3.5 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold flex items-center gap-1.5 transition shadow-lg shadow-violet-950/50 cursor-pointer"
             >
               <Sparkles className="w-3.5 h-3.5" />
@@ -2058,33 +2062,33 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
       </div>
 
       {/* Top Workspace Tabs: Lectures & Audio vs 4-Stage Pipeline vs Course Notebook */}
-      {courseId && (
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-5 p-1.5 rounded-2xl bg-zinc-900/90 border border-zinc-800 shadow-sm">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => setWorkspaceTab("lectures")}
-              className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer ${
-                workspaceTab === "lectures"
-                  ? "bg-violet-600 text-white shadow-md"
-                  : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/70"
-              }`}
-            >
-              <Mic className="w-3.5 h-3.5" />
-              <span>Lectures &amp; Audio ({lectures.length})</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setWorkspaceTab("pipeline")}
-              className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer ${
-                workspaceTab === "pipeline"
-                  ? "bg-cyan-600 text-white shadow-md"
-                  : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/70"
-              }`}
-            >
-              <Layers className="w-3.5 h-3.5" />
-              <span>4-Stage Pipeline</span>
-            </button>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-5 p-1.5 rounded-2xl bg-zinc-900/90 border border-zinc-800 shadow-sm">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setWorkspaceTab("lectures")}
+            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer ${
+              workspaceTab === "lectures"
+                ? "bg-violet-600 text-white shadow-md"
+                : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/70"
+            }`}
+          >
+            <Mic className="w-3.5 h-3.5" />
+            <span>Lectures &amp; Audio ({lectures.length})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setWorkspaceTab("pipeline")}
+            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer ${
+              workspaceTab === "pipeline"
+                ? "bg-cyan-600 text-white shadow-md"
+                : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/70"
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5" />
+            <span>4-Stage Pipeline</span>
+          </button>
+          {courseId && (
             <button
               type="button"
               onClick={() => {
@@ -2100,21 +2104,21 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
               <Library className="w-3.5 h-3.5" />
               <span>Course Notebook &amp; Grounded Q&amp;A</span>
             </button>
-          </div>
-
-          {notebookStats && (
-            <div className="flex flex-wrap items-center gap-2 px-3 text-[11px] text-zinc-400 font-mono">
-              <span>{notebookStats.distilledCount} distilled</span>
-              <span className="text-zinc-700">•</span>
-              <span>{notebookStats.extractedMaterialsCount} PDFs extracted</span>
-              <span className="text-zinc-700">•</span>
-              <span>~{Math.round(notebookStats.estimatedTokens / 1000)}k corpus tokens</span>
-            </div>
           )}
         </div>
-      )}
 
-      {workspaceTab === "pipeline" && courseId ? (
+        {notebookStats && courseId && (
+          <div className="flex flex-wrap items-center gap-2 px-3 text-[11px] text-zinc-400 font-mono">
+            <span>{notebookStats.distilledCount} distilled</span>
+            <span className="text-zinc-700">•</span>
+            <span>{notebookStats.extractedMaterialsCount} PDFs extracted</span>
+            <span className="text-zinc-700">•</span>
+            <span>~{Math.round(notebookStats.estimatedTokens / 1000)}k corpus tokens</span>
+          </div>
+        )}
+      </div>
+
+      {workspaceTab === "pipeline" ? (
         <PipelineStagesPanel
           courseId={courseId}
           isLocal={isLocal}
@@ -2133,10 +2137,11 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
           }}
           onOpenSettings={() => setIsSettingsOpen(true)}
           onOpenNotebookTab={() => {
+            if (!courseId) return;
             setWorkspaceTab("notebook");
             loadNotebookData(courseId);
           }}
-          onRefreshCourseData={() => loadCourseData(courseId)}
+          onRefreshCourseData={() => courseId && loadCourseData(courseId)}
           settingsOpen={isSettingsOpen}
         />
       ) : workspaceTab === "notebook" && courseId ? (
@@ -2391,10 +2396,7 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
               </p>
               <button
                 type="button"
-                onClick={() => {
-                  setIngestTab("echo360");
-                  setIngestModalOpen(true);
-                }}
+                onClick={() => setWorkspaceTab("pipeline")}
                 className="px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs inline-flex items-center gap-1.5 transition cursor-pointer shadow-md"
               >
                 <Sparkles className="w-3.5 h-3.5" />
@@ -2730,7 +2732,7 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
       {/* Ingest New Lecture Modal */}
       {ingestModalOpen && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-xs p-0 sm:p-4 animate-in fade-in">
-          <div className="bg-zinc-900 border-t sm:border border-zinc-800 rounded-t-2xl sm:rounded-2xl max-w-2xl w-full p-4 sm:p-6 shadow-2xl space-y-4 sm:space-y-5 max-h-[95vh] sm:max-h-[92vh] overflow-y-auto">
+          <div className="bg-zinc-900 border-t sm:border border-zinc-800 rounded-t-2xl sm:rounded-2xl max-w-5xl w-full p-4 sm:p-6 shadow-2xl space-y-4 sm:space-y-5 max-h-[95vh] sm:max-h-[92vh] overflow-y-auto">
             {/* Modal Header */}
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between border-b border-zinc-800 pb-4 gap-3">
               <div>

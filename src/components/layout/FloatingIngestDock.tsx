@@ -36,6 +36,7 @@ export function FloatingIngestDock() {
   } = useBackgroundIngest();
 
   const [showLectureList, setShowLectureList] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   if (!session) return null;
 
@@ -127,7 +128,11 @@ export function FloatingIngestDock() {
         className="fixed inset-0 bg-black/60 backdrop-blur-xs sm:hidden z-40 animate-in fade-in"
       />
 
-      <div className="fixed inset-x-0 bottom-0 sm:inset-auto sm:bottom-5 sm:right-5 z-50 sm:w-96 flex flex-col bg-zinc-900/98 sm:bg-zinc-900/95 backdrop-blur-md border-t sm:border border-zinc-700/80 rounded-t-2xl sm:rounded-2xl shadow-2xl text-zinc-100 overflow-hidden max-h-[85vh] sm:max-h-none animate-in fade-in slide-in-from-bottom-4 duration-200">
+      <div
+        className={`fixed inset-x-0 bottom-0 sm:inset-auto sm:bottom-5 sm:right-5 z-50 ${
+          expanded ? "sm:w-[min(92vw,760px)]" : "sm:w-96"
+        } flex flex-col bg-zinc-900/98 sm:bg-zinc-900/95 backdrop-blur-md border-t sm:border border-zinc-700/80 rounded-t-2xl sm:rounded-2xl shadow-2xl text-zinc-100 overflow-hidden max-h-[85vh] animate-in fade-in slide-in-from-bottom-4 duration-200 transition-all`}
+      >
         {/* Mobile Pull Bar */}
         <div className="sm:hidden pt-2 flex justify-center">
           <div className="w-10 h-1 bg-zinc-700 rounded-full" />
@@ -174,9 +179,25 @@ export function FloatingIngestDock() {
         </div>
 
         <div className="flex items-center gap-1">
+          <Link
+            href={`/lectures?course=${session.courseId}&tab=pipeline`}
+            onClick={() => setDockOpen(false)}
+            title="Open full-page 4-stage pipeline"
+            className="px-2 py-1 rounded-md text-[11px] font-semibold text-cyan-300 hover:text-white hover:bg-zinc-800 transition flex items-center gap-1"
+          >
+            <BookOpen className="w-3.5 h-3.5" />
+            <span>Full Page</span>
+          </Link>
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            title={expanded ? "Compact width" : "Expand dock"}
+            className="hidden sm:inline-flex p-1 rounded-md text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition"
+          >
+            {expanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+          </button>
           <button
             onClick={() => setDockOpen(false)}
-            title="Minimize dock"
+            title="Minimize to pill"
             className="p-1 rounded-md text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition"
           >
             <ChevronDown className="w-4 h-4" />
@@ -271,7 +292,11 @@ export function FloatingIngestDock() {
               </button>
 
               {showLectureList && (
-                <div className="mt-2 max-h-44 overflow-y-auto space-y-1.5 pr-1 text-xs">
+                <div
+                  className={`mt-2 ${
+                    expanded ? "max-h-[42vh]" : "max-h-44"
+                  } overflow-y-auto space-y-1.5 pr-1 text-xs`}
+                >
                   {session.lectures.map((l) => (
                     <div
                       key={l.lessonId}
@@ -344,11 +369,12 @@ export function FloatingIngestDock() {
               )}
 
               <Link
-                href={`/lectures?course=${session.courseId}`}
-                className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium transition"
+                href={`/lectures?course=${session.courseId}&tab=pipeline`}
+                onClick={() => setDockOpen(false)}
+                className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-cyan-300 hover:text-white text-xs font-medium transition"
               >
-                <BookOpen className="w-3.5 h-3.5" />
-                Notes
+                <Maximize2 className="w-3.5 h-3.5" />
+                Full Page
               </Link>
 
               <button
