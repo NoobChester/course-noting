@@ -172,6 +172,12 @@ export interface AISettings {
   anthropicModel?: string;
   ollamaUrl?: string;
   ollamaModel?: string;
+  // Batch Lecture Engine (Stage 1 transcript ingestion token-saver split)
+  useBatchEngine?: boolean;
+  batchProvider?: AIProvider;
+  batchModel?: string;
+  batchThinkingLevel?: "minimal" | "low" | "medium" | "high";
+  batchOllamaModel?: string;
 }
 
 export interface ProofReviewResult {
@@ -231,6 +237,7 @@ export interface LectureNote extends LectureNoteMeta {
   outline?: string[];
   insights?: LectureInsight[];
   questionHints?: QuestionHintInsight[];
+  contextWarning?: string;
 }
 
 /** Layer 1: Canonical Base Course Pack */

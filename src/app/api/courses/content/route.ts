@@ -2,59 +2,66 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
 import JSZip from "jszip";
+import {
+  checkCourseMaterialCoverage,
+  extractMaterialText,
+  reindexCourseMaterials,
+  saveExtractedSidecar
+} from "@/lib/material-extractor";
 
 const BASE_DIR = process.cwd();
 const COURSES_BASE_DIR = path.join(BASE_DIR, "courses");
 
-function extractTextFromBuffer(buffer: Buffer, ext: string): string {
-  const lowerExt = ext.toLowerCase();
-  if ([".md", ".txt", ".tex", ".latex", ".vtt", ".srt", ".csv", ".json"].includes(lowerExt)) {
-    return buffer.toString("utf-8");
-  }
-
-  if (lowerExt === ".pdf") {
-    // Basic extraction of readable text streams from PDF without native dependencies
-    const raw = buffer.toString("latin1");
-    const matches: string[] = [];
-    const textStreamRegex = /\(([^)]+)\)\s*Tj/g;
-    let match;
-    while ((match = textStreamRegex.exec(raw)) !== null) {
-      if (match[1] && match[1].trim().length > 1) {
-        matches.push(match[1]);
-      }
-    }
-    if (matches.length > 0) {
-      return matches.join(" ");
-    }
-    // Fallback: extract ASCII runs of 4+ characters
-    const asciiMatches = raw.match(/[A-Za-z0-9\s.,;:?!'"()$+=/\\-]{4,}/g) || [];
-    return asciiMatches.slice(0, 1000).join(" ");
-  }
-
-  return "";
-}
-
-// GET: List all uploaded course content for a course
+// GET: List all uploaded course content for a course (with optional per-week coverage check)
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const courseId = searchParams.get("course") || "sample1001";
     const cleanCourse = courseId.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const courseDir = path.join(/*turbopackIgnore: true*/ COURSES_BASE_DIR, cleanCourse);
+    const checkWeeksParam = searchParams.get("checkWeeks");
 
-    const manifestPath = path.join(COURSES_BASE_DIR, cleanCourse, "course_content.json");
+    let manifest: any = { items: [], lastUpdated: new Date().toISOString() };
+    const manifestPath = path.join(/*turbopackIgnore: true*/ courseDir, "course_content.json");
     try {
       const raw = await fs.readFile(manifestPath, "utf-8");
-      const manifest = JSON.parse(raw);
-      return NextResponse.json({ success: true, courseId: cleanCourse, manifest });
-    } catch {
-      return NextResponse.json({
-        success: true,
-        courseId: cleanCourse,
-        manifest: { items: [], lastUpdated: new Date().toISOString() }
-      });
+      manifest = JSON.parse(raw);
+    } catch {}
+
+    let coverage = undefined;
+    if (checkWeeksParam !== null) {
+      const weeks = checkWeeksParam
+        .split(",")
+        .map((s) => parseInt(s.trim(), 10))
+        .filter((n) => !Number.isNaN(n) && n > 0);
+      coverage = await checkCourseMaterialCoverage(courseDir, weeks);
     }
+
+    return NextResponse.json({
+      success: true,
+      courseId: cleanCourse,
+      manifest,
+      ...(coverage ? { coverage } : {})
+    });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
+
+// PUT: Re-extract existing uploaded PDFs/materials into `_extracted/*.txt` sidecars
+export async function PUT(req: NextRequest) {
+  try {
+    const { courseId = "sample1001" } = await req.json();
+    const cleanCourse = String(courseId).toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const courseDir = path.join(/*turbopackIgnore: true*/ COURSES_BASE_DIR, cleanCourse);
+    const summary = await reindexCourseMaterials(courseDir);
+    return NextResponse.json({
+      success: true,
+      courseId: cleanCourse,
+      ...summary
+    });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message || "Failed to re-extract course materials" }, { status: 500 });
   }
 }
 
@@ -131,10 +138,16 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        const extractedText = extractTextFromBuffer(entryBuffer, entryExt);
+        const itemId = `content-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+        const extractedText = await extractMaterialText(entryBuffer, entryExt);
+        const sidecar = await saveExtractedSidecar(
+          path.join(/*turbopackIgnore: true*/ COURSES_BASE_DIR, cleanCourse),
+          itemId,
+          extractedText
+        );
 
         const newItem = {
-          id: `content-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+          id: itemId,
           originalName: baseName,
           savedFileName: entryTargetFileName,
           relativePath: path.relative(path.join(COURSES_BASE_DIR, cleanCourse), entryTargetFilePath).replace(/\\/g, "/"),
@@ -144,7 +157,9 @@ export async function POST(req: NextRequest) {
           size: entryBuffer.length,
           mimeType: entryExt === ".pdf" ? "application/pdf" : "application/octet-stream",
           uploadedAt: new Date().toISOString(),
-          textSnippet: extractedText ? extractedText.slice(0, 5000) : ""
+          extractedPath: sidecar.extractedPath,
+          extractedChars: sidecar.extractedChars,
+          textSnippet: extractedText ? extractedText.slice(0, 2500) : ""
         };
 
         manifest.items.push(newItem);
@@ -180,10 +195,16 @@ export async function POST(req: NextRequest) {
 
     await fs.writeFile(targetFilePath, buffer);
 
-    const extractedText = extractTextFromBuffer(buffer, ext);
+    const itemId = `content-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const extractedText = await extractMaterialText(buffer, ext);
+    const sidecar = await saveExtractedSidecar(
+      path.join(/*turbopackIgnore: true*/ COURSES_BASE_DIR, cleanCourse),
+      itemId,
+      extractedText
+    );
 
     const newItem = {
-      id: `content-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      id: itemId,
       originalName: file.name,
       savedFileName: targetFileName,
       relativePath: path.relative(path.join(COURSES_BASE_DIR, cleanCourse), targetFilePath).replace(/\\/g, "/"),
@@ -193,7 +214,9 @@ export async function POST(req: NextRequest) {
       size: file.size,
       mimeType: file.type || "application/octet-stream",
       uploadedAt: new Date().toISOString(),
-      textSnippet: extractedText ? extractedText.slice(0, 5000) : ""
+      extractedPath: sidecar.extractedPath,
+      extractedChars: sidecar.extractedChars,
+      textSnippet: extractedText ? extractedText.slice(0, 2500) : ""
     };
 
     manifest.items.push(newItem);

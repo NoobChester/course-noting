@@ -4,11 +4,11 @@ import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
 
-export const DEFAULT_ANTIGRAVITY_MODEL = "gemini-4-hydrogen-medium";
+export const DEFAULT_ANTIGRAVITY_MODEL = "gemini-4-hydrogen-high";
 
 export const FALLBACK_ANTIGRAVITY_MODELS: { id: string; label: string }[] = [
-  { id: "gemini-4-hydrogen-medium", label: "Gemini 4 Hydrogen Medium" },
   { id: "gemini-4-hydrogen-high", label: "Gemini 4 Hydrogen High" },
+  { id: "gemini-4-hydrogen-medium", label: "Gemini 4 Hydrogen Medium" },
   { id: "gemini-4-hydrogen-low", label: "Gemini 4 Hydrogen Low" },
   { id: "gemini-4-argon-medium", label: "Gemini 4 Argon Medium" },
   { id: "gemini-3.8-flash-medium", label: "Gemini 3.8 Flash Medium" },

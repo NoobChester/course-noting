@@ -1,20 +1,29 @@
 import { isLocalStudio } from "./pack-loader";
-import { AISettings } from "./types";
+import { AIProvider, AISettings } from "./types";
 
-export const DEFAULT_ANTIGRAVITY_MODEL_ID = "gemini-4-hydrogen-medium";
+export const DEFAULT_ANTIGRAVITY_MODEL_ID = "gemini-4-hydrogen-high";
+export const DEFAULT_GEMINI_MODEL_ID = "gemini-4-hydrogen";
+export const DEFAULT_BATCH_PROVIDER: AIProvider = "gemini";
+export const DEFAULT_BATCH_MODEL_ID = "gemini-4-hydrogen";
+export const DEFAULT_BATCH_THINKING_LEVEL = "low" as const;
 
 export function getDefaultAiSettings(local: boolean = isLocalStudio()): AISettings {
   return {
     provider: local ? "antigravity" : "gemini",
     antigravityModel: DEFAULT_ANTIGRAVITY_MODEL_ID,
     geminiKey: "",
-    geminiModel: "gemini-2.5-flash",
+    geminiModel: DEFAULT_GEMINI_MODEL_ID,
     openaiKey: "",
     openaiModel: "gpt-4o-mini",
     anthropicKey: "",
     anthropicModel: "claude-3-5-sonnet-20241022",
     ollamaUrl: "http://localhost:11434",
-    ollamaModel: "llama3"
+    ollamaModel: "llama3",
+    useBatchEngine: true,
+    batchProvider: DEFAULT_BATCH_PROVIDER,
+    batchModel: DEFAULT_BATCH_MODEL_ID,
+    batchThinkingLevel: DEFAULT_BATCH_THINKING_LEVEL,
+    batchOllamaModel: "qwen2.5:7b-instruct"
   };
 }
 
@@ -33,7 +42,9 @@ export function loadClientAiSettings(local: boolean = isLocalStudio()): AISettin
     return {
       ...defaults,
       ...parsed,
-      provider: parsed.provider || defaults.provider
+      provider: parsed.provider || defaults.provider,
+      antigravityModel: parsed.antigravityModel || defaults.antigravityModel,
+      batchThinkingLevel: parsed.batchThinkingLevel || defaults.batchThinkingLevel
     };
   } catch {
     return defaults;
@@ -45,7 +56,7 @@ export function getActiveAiModel(settings: AISettings): string {
     case "antigravity":
       return settings.antigravityModel || DEFAULT_ANTIGRAVITY_MODEL_ID;
     case "gemini":
-      return settings.geminiModel || "gemini-2.5-flash";
+      return settings.geminiModel || DEFAULT_GEMINI_MODEL_ID;
     case "openai":
       return settings.openaiModel || "gpt-4o-mini";
     case "anthropic":
@@ -53,6 +64,13 @@ export function getActiveAiModel(settings: AISettings): string {
     case "ollama":
       return settings.ollamaModel || "llama3";
   }
+}
+
+function getKeyForProvider(settings: AISettings, provider: AIProvider): string | undefined {
+  if (provider === "gemini") return settings.geminiKey?.trim() || undefined;
+  if (provider === "openai") return settings.openaiKey?.trim() || undefined;
+  if (provider === "anthropic") return settings.anthropicKey?.trim() || undefined;
+  return undefined;
 }
 
 export function isAiSettingsConfigured(
@@ -70,27 +88,58 @@ export function isAiSettingsConfigured(
 }
 
 /**
- * Normalizes stored AI settings into the unified payload consumed by Local Studio API routes.
+ * Normalizes primary AI settings for Workspace-Aware tasks (Notebook synthesis, Q&A, Proof auditing).
  */
 export function normalizeAiPayload(settings: AISettings) {
-  const apiKey =
-    settings.provider === "gemini"
-      ? settings.geminiKey
-      : settings.provider === "openai"
-      ? settings.openaiKey
-      : settings.provider === "anthropic"
-      ? settings.anthropicKey
-      : undefined;
-
   return {
     provider: settings.provider,
-    apiKey: apiKey?.trim(),
+    apiKey: getKeyForProvider(settings, settings.provider),
+    geminiFallbackKey: settings.geminiKey?.trim() || undefined,
     model: getActiveAiModel(settings),
     antigravityModel: settings.antigravityModel || DEFAULT_ANTIGRAVITY_MODEL_ID,
-    geminiModel: settings.geminiModel,
+    geminiModel: settings.geminiModel || DEFAULT_GEMINI_MODEL_ID,
     openaiModel: settings.openaiModel,
     anthropicModel: settings.anthropicModel,
     ollamaUrl: settings.ollamaUrl || "http://localhost:11434",
     ollamaModel: settings.ollamaModel || "qwen2.5:7b-instruct"
+  };
+}
+
+/**
+ * Resolves the Stage 1 Batch Lecture Engine payload.
+ * When `useBatchEngine` is enabled and credentials for `batchProvider` (default Gemini API Hydrogen + `low` thinking)
+ * exist, routes heavy multi-hour transcripts there while attaching `geminiFallbackKey` for `.m4a` audio fallback.
+ */
+export function normalizeBatchAiPayload(settings: AISettings) {
+  const base = normalizeAiPayload(settings);
+  if (settings.useBatchEngine === false) {
+    return base;
+  }
+
+  const batchProvider = settings.batchProvider || DEFAULT_BATCH_PROVIDER;
+  const batchKey = getKeyForProvider(settings, batchProvider);
+  const needsKey = batchProvider === "gemini" || batchProvider === "openai" || batchProvider === "anthropic";
+
+  // If batchProvider needs a key that isn't configured yet, gracefully fall back to primary configured provider
+  if (needsKey && !batchKey) {
+    return base;
+  }
+
+  const batchModel =
+    batchProvider === "ollama"
+      ? settings.batchOllamaModel || settings.ollamaModel || "qwen2.5:7b-instruct"
+      : settings.batchModel || (batchProvider === "gemini" ? DEFAULT_BATCH_MODEL_ID : base.model);
+
+  return {
+    ...base,
+    provider: batchProvider,
+    apiKey: batchKey,
+    model: batchModel,
+    thinkingLevel: settings.batchThinkingLevel || DEFAULT_BATCH_THINKING_LEVEL,
+    antigravityModel: batchProvider === "antigravity" ? batchModel : base.antigravityModel,
+    geminiModel: batchProvider === "gemini" ? batchModel : base.geminiModel,
+    openaiModel: batchProvider === "openai" ? batchModel : base.openaiModel,
+    anthropicModel: batchProvider === "anthropic" ? batchModel : base.anthropicModel,
+    ollamaModel: batchProvider === "ollama" ? batchModel : base.ollamaModel
   };
 }

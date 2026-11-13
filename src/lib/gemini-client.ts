@@ -6,6 +6,30 @@
 
 import { ProofReviewResult } from "./types";
 
+export type GeminiThinkingLevel = "minimal" | "low" | "medium" | "high" | "xhigh";
+
+/**
+ * Builds generationConfig for Google Gemini REST API calls, applying `thinkingConfig.thinkingLevel`
+ * for Gemini 3.x / 4.x models while omitting legacy `thinkingBudget`.
+ */
+export function buildGeminiGenerationConfig(options: {
+  model: string;
+  temperature?: number;
+  responseMimeType?: string;
+  thinkingLevel?: GeminiThinkingLevel;
+}) {
+  const config: Record<string, any> = {};
+  if (typeof options.temperature === "number") config.temperature = options.temperature;
+  if (options.responseMimeType) config.responseMimeType = options.responseMimeType;
+
+  if (options.thinkingLevel && /gemini-(?:3|4)/i.test(options.model)) {
+    config.thinkingConfig = {
+      thinkingLevel: options.thinkingLevel
+    };
+  }
+  return config;
+}
+
 let cachedGeminiModel: string | null = null;
 
 /**
@@ -21,15 +45,12 @@ export async function resolveGeminiModel(apiKey: string, preferredModel?: string
 
   const key = apiKey.trim();
   const candidatePreferences = [
+    "gemini-4-hydrogen",
+    "gemini-4-argon",
+    "gemini-3.8-flash",
     "gemini-2.5-flash",
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-lite",
-    "gemini-1.5-flash-latest",
-    "gemini-1.5-flash-8b",
-    "gemini-1.5-flash",
     "gemini-2.5-pro",
-    "gemini-1.5-pro",
-    "gemini-1.5-pro-latest"
+    "gemini-2.0-flash"
   ];
 
   try {
@@ -57,9 +78,8 @@ export async function resolveGeminiModel(apiKey: string, preferredModel?: string
     console.warn("Could not query Gemini ListModels dynamically:", err);
   }
 
-  // Default fallback to 2.5-flash
-  cachedGeminiModel = "gemini-2.5-flash";
-  return "gemini-2.5-flash";
+  cachedGeminiModel = "gemini-4-hydrogen";
+  return "gemini-4-hydrogen";
 }
 
 /**
@@ -83,12 +103,12 @@ export async function listAvailableGeminiModels(apiKey: string): Promise<string[
     console.warn("Could not list Gemini models:", err);
   }
   return [
+    "gemini-4-hydrogen",
+    "gemini-4-argon",
+    "gemini-4-carbon",
+    "gemini-3.8-flash",
     "gemini-2.5-flash",
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-lite",
-    "gemini-1.5-flash-latest",
-    "gemini-2.5-pro",
-    "gemini-1.5-pro"
+    "gemini-2.5-pro"
   ];
 }
 
