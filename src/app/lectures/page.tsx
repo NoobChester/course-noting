@@ -50,7 +50,10 @@ import {
   AlertOctagon,
   Save,
   Zap,
-  FolderLock
+  FolderLock,
+  MessageSquare,
+  Library,
+  X
 } from "lucide-react";
 import { SettingsModal } from "@/components/layout/SettingsModal";
 import { useBackgroundIngest, IngestLectureItem } from "@/context/BackgroundIngestContext";
@@ -67,7 +70,8 @@ import {
   getActiveAiModel,
   isAiSettingsConfigured,
   loadClientAiSettings,
-  normalizeAiPayload
+  normalizeAiPayload,
+  normalizeBatchAiPayload
 } from "@/lib/ai-settings";
 import JSZip from "jszip";
 
@@ -88,6 +92,50 @@ export default function LecturesPage() {
   const [isLocal, setIsLocal] = useState(false);
   const [showCapabilityDetails, setShowCapabilityDetails] = useState(false);
   const [mobileTab, setMobileTab] = useState<"list" | "viewer">("viewer");
+  const [workspaceTab, setWorkspaceTab] = useState<"lectures" | "notebook">("lectures");
+
+  // Stage 2 Course Notebook Compiler & Grounded Q&A state
+  const [notebookStats, setNotebookStats] = useState<{
+    distilledCount: number;
+    rawTranscriptsCount: number;
+    extractedMaterialsCount: number;
+    conceptsCount: number;
+    questionsCount: number;
+    estimatedTokens: number;
+  } | null>(null);
+  const [notebookData, setNotebookData] = useState<{
+    markdown: string;
+    compiledAt: string | null;
+    provider: string | null;
+    model: string | null;
+    weeklyArc: any[];
+    crossLinks: any[];
+  } | null>(null);
+  const [notebookLoading, setNotebookLoading] = useState(false);
+  const [notebookCompiling, setNotebookCompiling] = useState(false);
+  const [notebookError, setNotebookError] = useState<string | null>(null);
+  const [notebookQuestion, setNotebookQuestion] = useState("");
+  const [notebookAsking, setNotebookAsking] = useState(false);
+  const [notebookMessages, setNotebookMessages] = useState<
+    {
+      role: "user" | "assistant";
+      content: string;
+      citations?: { lectureId: string; title: string; week: number; timestamp: string; source: string; excerpt?: string }[];
+      unverifiedGap?: string;
+      model?: string;
+    }[]
+  >([]);
+
+  // Sparse/Missing Course Material Warning + Re-extraction state
+  const [coverageWarning, setCoverageWarning] = useState<{
+    mode: "batch" | "single";
+    insufficientWeeks: number[];
+    globalChars: number;
+    totalCourseItems: number;
+    byWeek: Record<number, number>;
+  } | null>(null);
+  const [reextractingMaterials, setReextractingMaterials] = useState(false);
+  const [reextractStatus, setReextractStatus] = useState<string | null>(null);
 
   // Push modal state
   const [pushModalOpen, setPushModalOpen] = useState(false);
@@ -247,6 +295,7 @@ export default function LecturesPage() {
               setSelectedLecture(notes[0]);
             }
           }
+          loadNotebookData(courseId);
         }
       } catch (e) {
         console.error("Failed to auto-refresh lectures", e);
@@ -260,7 +309,7 @@ export default function LecturesPage() {
   const [aiConfigured, setAiConfigured] = useState<{ configured: boolean; provider: string; model?: string }>({
     configured: false,
     provider: "gemini",
-    model: "gemini-2.5-flash"
+    model: "gemini-4-hydrogen"
   });
 
   useEffect(() => {
@@ -294,6 +343,136 @@ export default function LecturesPage() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState("00:00:00");
 
+  const loadNotebookData = async (targetCourse: string) => {
+    if (!targetCourse || !isLocalStudio()) return;
+    setNotebookLoading(true);
+    try {
+      const res = await fetch(`/api/courses/notebook?course=${targetCourse}`);
+      if (res.ok) {
+        const data = await res.json();
+        setNotebookStats(data.stats || null);
+        setNotebookData(data.notebook || null);
+      }
+    } catch {
+      // ignore in offline mode
+    } finally {
+      setNotebookLoading(false);
+    }
+  };
+
+  const handleCompileNotebook = async () => {
+    if (!courseId || !isLocal) return;
+    setNotebookCompiling(true);
+    setNotebookError(null);
+    try {
+      const aiPayload = normalizeAiPayload(loadClientAiSettings(true));
+      const res = await fetch("/api/courses/notebook", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          courseId,
+          action: "compile",
+          aiSettings: aiPayload
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to compile Master Course Notebook");
+      setNotebookData({
+        markdown: data.markdown,
+        compiledAt: data.compiledAt,
+        provider: data.provider,
+        model: data.model,
+        weeklyArc: data.weeklyArc || [],
+        crossLinks: data.crossLinks || []
+      });
+      loadCourseData(courseId);
+    } catch (err: any) {
+      setNotebookError(err.message || "Failed to compile Master Course Notebook");
+    } finally {
+      setNotebookCompiling(false);
+    }
+  };
+
+  const handleAskNotebook = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const q = notebookQuestion.trim();
+    if (!q || !courseId || notebookAsking) return;
+
+    const nextHistory = [...notebookMessages, { role: "user" as const, content: q }];
+    setNotebookMessages(nextHistory);
+    setNotebookQuestion("");
+    setNotebookAsking(true);
+    setNotebookError(null);
+
+    try {
+      const aiPayload = normalizeAiPayload(loadClientAiSettings(true));
+      const res = await fetch("/api/courses/notebook", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          courseId,
+          action: "ask",
+          question: q,
+          history: notebookMessages.slice(-6).map((m) => ({ role: m.role, content: m.content })),
+          aiSettings: aiPayload
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Question answering failed");
+
+      setNotebookMessages([
+        ...nextHistory,
+        {
+          role: "assistant",
+          content: data.answer || "",
+          citations: data.citations || [],
+          unverifiedGap: data.unverifiedGap || "",
+          model: data.model || ""
+        }
+      ]);
+    } catch (err: any) {
+      setNotebookError(err.message || "Failed to query course notebook");
+    } finally {
+      setNotebookAsking(false);
+    }
+  };
+
+  const handleCitationJump = (lectureId: string, timestamp?: string) => {
+    const match = lectures.find((l) => l.id === lectureId);
+    if (match) {
+      setWorkspaceTab("lectures");
+      setSelectedLecture(match);
+      setMobileTab("viewer");
+      if (timestamp) {
+        setTimeout(() => handleTimestampClick(timestamp), 120);
+      }
+    }
+  };
+
+  const handleReextractMaterials = async () => {
+    if (!courseId || !isLocal) return;
+    setReextractingMaterials(true);
+    setReextractStatus(null);
+    try {
+      const res = await fetch("/api/courses/content", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ courseId })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Re-extraction failed");
+      setReextractStatus(
+        `Extracted ${data.extractedCount || 0} PDF/text files (${Math.round((data.totalChars || 0) / 1000)}k chars).`
+      );
+      setCoverageWarning(null);
+      loadNotebookData(courseId);
+    } catch (err: any) {
+      setReextractStatus(`Error: ${err.message || "Re-extraction failed"}`);
+    } finally {
+      setReextractingMaterials(false);
+    }
+  };
+
   const loadCourseData = (targetCourse: string) => {
     if (!targetCourse) {
       setLectures([]);
@@ -323,6 +502,10 @@ export default function LecturesPage() {
         }
       })
       .finally(() => setLoading(false));
+
+    if (isLocalStudio()) {
+      loadNotebookData(targetCourse);
+    }
 
     // Load concepts and questions for push selector
     fetch(`/api/concepts?course=${targetCourse}`)
@@ -765,7 +948,7 @@ export default function LecturesPage() {
 
       if (autoDistillAfterPull && data.transcriptText) {
         setAutoPullProgress("Distilling high-yield intuitions with AI engine...");
-        const aiPayload = normalizeAiPayload(loadClientAiSettings(isLocalStudio()));
+        const aiPayload = normalizeBatchAiPayload(loadClientAiSettings(isLocalStudio()));
 
         const enrichRes = await fetch("/api/lectures/enrich", {
           method: "POST",
@@ -1281,7 +1464,11 @@ export default function LecturesPage() {
     await globalStartBatchDownload(courseId, discoveredLectures, echoAudioOnly);
   };
 
-  const handleStartDistillationPipeline = async (withUploadedContext: boolean = true, requireAi: boolean = true) => {
+  const handleStartDistillationPipeline = async (
+    withUploadedContext: boolean = true,
+    requireAi: boolean = true,
+    bypassCoverageWarning: boolean = false
+  ) => {
     const local = isLocalStudio();
     const currentAiSettings = loadClientAiSettings(local);
     const hasAiKey = isAiSettingsConfigured(currentAiSettings, local);
@@ -1294,19 +1481,45 @@ export default function LecturesPage() {
       return;
     }
 
-    // 1. Immediately close modal and run distillation in background!
-    setIngestModalOpen(false);
-
     const selected = discoveredLectures.filter((l) => l.selected && l.status !== "done");
     if (selected.length === 0) {
+      setIngestModalOpen(false);
       return;
     }
+
+    // Warn user upfront when course PDFs/notes are missing or sparse rather than silently raising thinking level
+    if (requireAi && local && !bypassCoverageWarning) {
+      try {
+        const weeks = Array.from(new Set(selected.map((l) => l.week || 1)));
+        const covRes = await fetch(`/api/courses/content?course=${courseId}&checkWeeks=${weeks.join(",")}`);
+        if (covRes.ok) {
+          const covData = await covRes.json();
+          const cov = covData.coverage;
+          if (cov && (cov.totalCourseItems === 0 || (cov.insufficientWeeks && cov.insufficientWeeks.length > 0) || cov.globalChars < 300)) {
+            setCoverageWarning({
+              mode: "batch",
+              insufficientWeeks: cov.insufficientWeeks || [],
+              globalChars: cov.globalChars || 0,
+              totalCourseItems: cov.totalCourseItems || 0,
+              byWeek: cov.byWeek || {}
+            });
+            return;
+          }
+        }
+      } catch {
+        // Proceed cleanly if coverage endpoint is unreachable
+      }
+    }
+
+    setCoverageWarning(null);
+    // 1. Immediately close modal and run distillation in background!
+    setIngestModalOpen(false);
 
     await globalStartDistillationQueue(
       courseId,
       discoveredLectures,
       requireAi,
-      normalizeAiPayload(currentAiSettings),
+      normalizeBatchAiPayload(currentAiSettings),
       echoAudioOnly
     );
   };
@@ -1356,10 +1569,51 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
     setTimeout(() => setCopiedDownloadCmd(false), 2000);
   };
 
-  const handleRunExtraction = async () => {
+  const handleRunExtraction = async (bypassCoverageWarning: boolean = false) => {
+    if (
+      !bypassCoverageWarning &&
+      (!slideText || slideText.trim().length < 300) &&
+      transcriptText.trim().length > 0
+    ) {
+      // Check uploaded course materials before warning
+      let hasCourseCoverage = false;
+      if (isLocalStudio() && courseId) {
+        try {
+          const covRes = await fetch(`/api/courses/content?course=${courseId}&checkWeeks=${ingestWeek}`);
+          if (covRes.ok) {
+            const covData = await covRes.json();
+            const cov = covData.coverage;
+            if (cov && cov.globalChars >= 300 && !(cov.insufficientWeeks || []).includes(ingestWeek)) {
+              hasCourseCoverage = true;
+            } else if (cov) {
+              setCoverageWarning({
+                mode: "single",
+                insufficientWeeks: cov.insufficientWeeks || [ingestWeek],
+                globalChars: cov.globalChars || 0,
+                totalCourseItems: cov.totalCourseItems || 0,
+                byWeek: cov.byWeek || {}
+              });
+              return;
+            }
+          }
+        } catch {}
+      }
+      if (!hasCourseCoverage) {
+        setCoverageWarning({
+          mode: "single",
+          insufficientWeeks: [ingestWeek],
+          globalChars: slideText.trim().length,
+          totalCourseItems: 0,
+          byWeek: {}
+        });
+        return;
+      }
+    }
+
+    setCoverageWarning(null);
     setExtracting(true);
     try {
-      const aiPayload = normalizeAiPayload(loadClientAiSettings(isLocalStudio()));
+      const aiPayload = normalizeBatchAiPayload(loadClientAiSettings(isLocalStudio()));
 
       const res = await fetch("/api/lectures/enrich", {
         method: "POST",
@@ -1792,6 +2046,252 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
         )}
       </div>
 
+      {/* Top Workspace Tabs: Lectures & Audio vs Stage 2 Course Notebook */}
+      {courseId && (
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-5 p-1.5 rounded-2xl bg-zinc-900/90 border border-zinc-800 shadow-sm">
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setWorkspaceTab("lectures")}
+              className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer ${
+                workspaceTab === "lectures"
+                  ? "bg-violet-600 text-white shadow-md"
+                  : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/70"
+              }`}
+            >
+              <Mic className="w-3.5 h-3.5" />
+              <span>Lectures &amp; Audio ({lectures.length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setWorkspaceTab("notebook");
+                loadNotebookData(courseId);
+              }}
+              className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer ${
+                workspaceTab === "notebook"
+                  ? "bg-indigo-600 text-white shadow-md"
+                  : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/70"
+              }`}
+            >
+              <Library className="w-3.5 h-3.5" />
+              <span>Course Notebook &amp; Grounded Q&amp;A</span>
+            </button>
+          </div>
+
+          {notebookStats && (
+            <div className="flex flex-wrap items-center gap-2 px-3 text-[11px] text-zinc-400 font-mono">
+              <span>{notebookStats.distilledCount} distilled</span>
+              <span className="text-zinc-700">•</span>
+              <span>{notebookStats.extractedMaterialsCount} PDFs extracted</span>
+              <span className="text-zinc-700">•</span>
+              <span>~{Math.round(notebookStats.estimatedTokens / 1000)}k corpus tokens</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {workspaceTab === "notebook" && courseId ? (
+        <div className="space-y-6 animate-in fade-in duration-150">
+          {/* Course Notebook Readiness & Compiler Card */}
+          <div className="p-5 sm:p-6 rounded-2xl bg-zinc-900/70 border border-zinc-800 space-y-4 shadow-xl">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-800 pb-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Library className="w-5 h-5 text-indigo-400" />
+                  <h2 className="text-lg font-black text-white">
+                    {courseId.toUpperCase()} Master Course Notebook
+                  </h2>
+                  {notebookData?.model && (
+                    <span className="px-2 py-0.5 rounded-full bg-indigo-950/70 border border-indigo-700/50 text-indigo-300 font-mono text-[10px]">
+                      {notebookData.provider}/{notebookData.model}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-zinc-400 mt-1">
+                  Stage 2 workspace-aware synthesis across all distilled lectures, extracted PDF slides/sheets, concepts, and exam questions.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {isLocal && (
+                  <button
+                    type="button"
+                    disabled={reextractingMaterials}
+                    onClick={handleReextractMaterials}
+                    className="px-3 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold flex items-center gap-1.5 border border-zinc-700 cursor-pointer disabled:opacity-50"
+                    title="Re-extract text from all uploaded course PDFs via unpdf"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 text-emerald-400 ${reextractingMaterials ? "animate-spin" : ""}`} />
+                    <span>Re-extract PDFs</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  disabled={notebookCompiling || !isLocal}
+                  onClick={handleCompileNotebook}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white text-xs font-bold flex items-center gap-2 shadow-lg shadow-indigo-950/50 cursor-pointer disabled:opacity-50"
+                >
+                  <Sparkles className={`w-3.5 h-3.5 ${notebookCompiling ? "animate-pulse" : ""}`} />
+                  <span>{notebookCompiling ? "Compiling Course Notebook..." : "Compile Master Course Notebook"}</span>
+                </button>
+              </div>
+            </div>
+
+            {notebookStats && (
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+                {[
+                  { label: "Distilled Lectures", val: notebookStats.distilledCount, color: "text-violet-300" },
+                  { label: "Raw Transcripts", val: notebookStats.rawTranscriptsCount, color: "text-zinc-200" },
+                  { label: "Extracted PDFs", val: notebookStats.extractedMaterialsCount, color: "text-emerald-300" },
+                  { label: "Concepts Linked", val: notebookStats.conceptsCount, color: "text-indigo-300" },
+                  { label: "Questions Linked", val: notebookStats.questionsCount, color: "text-amber-300" }
+                ].map((stat) => (
+                  <div key={stat.label} className="p-3 rounded-xl bg-zinc-950/70 border border-zinc-800/80">
+                    <div className={`text-lg font-black font-mono ${stat.color}`}>{stat.val}</div>
+                    <div className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider">{stat.label}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {reextractStatus && (
+              <div className="p-2.5 rounded-lg bg-emerald-950/40 border border-emerald-800/50 text-xs text-emerald-300">
+                {reextractStatus}
+              </div>
+            )}
+            {notebookError && (
+              <div className="p-3 rounded-xl bg-red-950/50 border border-red-800 text-xs text-red-200 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                <span>{notebookError}</span>
+              </div>
+            )}
+
+            {notebookLoading ? (
+              <div className="p-8 text-center text-xs text-zinc-500 animate-pulse">Loading notebook compilation...</div>
+            ) : notebookData?.markdown ? (
+              <div className="space-y-4">
+                {Array.isArray(notebookData.weeklyArc) && notebookData.weeklyArc.length > 0 && (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+                    {notebookData.weeklyArc.map((w: any, idx: number) => (
+                      <div key={idx} className="p-3 rounded-xl bg-zinc-950/60 border border-zinc-800 space-y-1">
+                        <div className="text-[10px] font-mono font-bold text-indigo-400 uppercase">Week {w.week}</div>
+                        <div className="text-xs font-bold text-zinc-100">{w.theme}</div>
+                        {Array.isArray(w.keyConcepts) && w.keyConcepts.length > 0 && (
+                          <div className="flex flex-wrap gap-1 pt-1">
+                            {w.keyConcepts.slice(0, 5).map((c: string) => (
+                              <span key={c} className="px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-[10px] text-zinc-400 font-mono">
+                                {c}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="p-5 rounded-xl bg-zinc-950/80 border border-zinc-800 max-h-[540px] overflow-y-auto prose prose-invert max-w-none text-sm">
+                  <MathRenderer content={notebookData.markdown} />
+                </div>
+              </div>
+            ) : (
+              <div className="p-8 text-center rounded-xl border border-dashed border-zinc-800 bg-zinc-950/40 space-y-2">
+                <BookOpen className="w-7 h-7 text-zinc-600 mx-auto" />
+                <p className="text-xs font-semibold text-zinc-300">No Master Course Notebook Compiled Yet</p>
+                <p className="text-[11px] text-zinc-500 max-w-md mx-auto">
+                  After batch-distilling your lectures or uploading course PDFs, click &quot;Compile Master Course Notebook&quot; to cross-link the entire semester.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Grounded Q&A Chat Panel */}
+          <div className="p-5 sm:p-6 rounded-2xl bg-zinc-900/70 border border-zinc-800 space-y-4 shadow-xl">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+              <div className="flex items-center gap-2">
+                <MessageSquare className="w-4 h-4 text-emerald-400" />
+                <h3 className="text-sm font-bold text-white">Ask Course Notebook (Timestamp-Grounded Q&amp;A)</h3>
+              </div>
+              <span className="text-[10px] text-zinc-500 font-mono">Click any [Week X @ hh:mm:ss] badge to jump to audio</span>
+            </div>
+
+            <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
+              {notebookMessages.length === 0 ? (
+                <p className="text-xs text-zinc-500 py-4 text-center">
+                  Ask anything across lectures &amp; PDFs (e.g. &quot;Trace every time convergence in measure appeared and list exam traps&quot;).
+                </p>
+              ) : (
+                notebookMessages.map((msg, idx) => (
+                  <div
+                    key={idx}
+                    className={`p-3.5 rounded-xl border text-xs space-y-2 ${
+                      msg.role === "user"
+                        ? "bg-indigo-950/30 border-indigo-800/50 text-indigo-100 ml-8"
+                        : "bg-zinc-950/80 border-zinc-800 text-zinc-200 mr-4"
+                    }`}
+                  >
+                    <div className="font-bold text-[10px] uppercase tracking-wider text-zinc-400 flex items-center justify-between">
+                      <span>{msg.role === "user" ? "You" : `Notebook Assistant${msg.model ? ` (${msg.model})` : ""}`}</span>
+                    </div>
+                    {msg.role === "assistant" ? (
+                      <div className="prose prose-invert prose-sm max-w-none">
+                        <MathRenderer content={msg.content} />
+                      </div>
+                    ) : (
+                      <p>{msg.content}</p>
+                    )}
+
+                    {msg.citations && msg.citations.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-2 border-t border-zinc-800/70">
+                        {msg.citations.map((cit, cIdx) => (
+                          <button
+                            key={cIdx}
+                            type="button"
+                            onClick={() => handleCitationJump(cit.lectureId, cit.timestamp)}
+                            className="px-2 py-1 rounded-lg bg-zinc-900 hover:bg-violet-950/70 border border-zinc-700 hover:border-violet-500 text-[10px] font-mono text-violet-300 flex items-center gap-1 cursor-pointer transition"
+                            title={cit.excerpt || cit.title}
+                          >
+                            <Clock className="w-3 h-3 text-violet-400" />
+                            <span>
+                              Week {cit.week} @ {cit.timestamp || "00:00:00"} — {cit.title}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {msg.unverifiedGap && (
+                      <div className="p-2 rounded-lg bg-amber-950/40 border border-amber-800/50 text-[11px] text-amber-300">
+                        Missing coverage note: {msg.unverifiedGap}
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+
+            <form onSubmit={handleAskNotebook} className="flex items-center gap-2 pt-2">
+              <input
+                type="text"
+                value={notebookQuestion}
+                onChange={(e) => setNotebookQuestion(e.target.value)}
+                placeholder="Ask a cross-lecture or proof question..."
+                className="flex-1 rounded-xl bg-zinc-950 border border-zinc-800 px-3.5 py-2.5 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-hidden focus:border-indigo-500"
+              />
+              <button
+                type="submit"
+                disabled={notebookAsking || !notebookQuestion.trim() || !isLocal}
+                className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>{notebookAsking ? "Searching..." : "Ask"}</span>
+              </button>
+            </form>
+          </div>
+        </div>
+      ) : (
+        <>
       {/* Mobile Segmented Switcher (< lg) */}
       <div className="lg:hidden flex items-center p-1 bg-zinc-900/90 border border-zinc-800 rounded-xl mb-4 shadow-sm">
         <button
@@ -1999,6 +2499,12 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
                   </div>
                 </div>
                 <h2 className="text-2xl font-black text-white mt-2">{selectedLecture.title}</h2>
+                {selectedLecture.contextWarning && (
+                  <div className="mt-3 p-2.5 rounded-xl bg-amber-950/40 border border-amber-800/60 text-xs text-amber-200 flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <span>{selectedLecture.contextWarning}</span>
+                  </div>
+                )}
               </div>
 
               {/* Spoken Intuitions Callouts */}
@@ -2079,6 +2585,8 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
           )}
         </div>
       </div>
+        </>
+      )}
 
       {/* Push to Concept / Question Modal */}
       {pushModalOpen && activeSnippet && (
@@ -3263,15 +3771,34 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
 
                         {/* Category Selector Bar & Box Creator */}
                         <div className="p-3.5 rounded-xl bg-zinc-900/60 border border-zinc-800 space-y-3">
-                          <div className="flex items-center justify-between">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
                             <label className="text-xs font-bold text-zinc-200 flex items-center gap-1.5">
                               <FileUp className="w-3.5 h-3.5 text-violet-400" />
                               <span>Stage Course Materials (Slides, Problem Sheets, Notes)</span>
                             </label>
-                            <span className="text-[10px] text-zinc-500">
-                              PDF, LaTeX (.tex), Markdown, Text
-                            </span>
+                            <div className="flex items-center gap-2">
+                              {isLocal && (
+                                <button
+                                  type="button"
+                                  disabled={reextractingMaterials}
+                                  onClick={handleReextractMaterials}
+                                  className="px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-emerald-300 text-[10px] font-semibold flex items-center gap-1 border border-zinc-700 cursor-pointer disabled:opacity-50"
+                                  title="Re-extract plain text from already-uploaded PDFs using unpdf"
+                                >
+                                  <RefreshCw className={`w-3 h-3 ${reextractingMaterials ? "animate-spin" : ""}`} />
+                                  <span>{reextractingMaterials ? "Extracting..." : "Re-extract Course Materials"}</span>
+                                </button>
+                              )}
+                              <span className="text-[10px] text-zinc-500">
+                                PDF, LaTeX (.tex), Markdown, Text
+                              </span>
+                            </div>
                           </div>
+                          {reextractStatus && (
+                            <div className="p-2 rounded-lg bg-emerald-950/40 border border-emerald-800/50 text-[11px] text-emerald-300">
+                              {reextractStatus}
+                            </div>
+                          )}
 
                           {/* Category Pills */}
                           <div className="flex flex-wrap items-center gap-1.5 text-xs">
@@ -3419,6 +3946,52 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
                             ))
                           )}
                         </div>
+
+                        {/* Insufficient / Missing Course Materials Warning Banner */}
+                        {coverageWarning && coverageWarning.mode === "batch" && (
+                          <div className="p-3.5 rounded-xl bg-amber-950/50 border border-amber-700/70 text-xs text-amber-200 space-y-2.5 animate-in fade-in">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex items-start gap-2">
+                                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                                <div className="space-y-1">
+                                  <div className="font-bold text-amber-100">
+                                    Missing or Sparse Weekly Course Materials Detected
+                                  </div>
+                                  <p className="text-[11px] text-amber-200/90 leading-relaxed">
+                                    {coverageWarning.totalCourseItems === 0
+                                      ? "No extracted PDFs or course notes were found for this course yet."
+                                      : `Extracted PDF/note text is sparse (<300 chars) for Week(s): ${coverageWarning.insufficientWeeks.join(", ")}.`}{" "}
+                                    Because Batch Mode stays on <strong>Hydrogen Low</strong> (never silently upgraded to Medium), notes will rely mainly on the lecture transcript without slide grounding.
+                                  </p>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setCoverageWarning(null)}
+                                className="text-amber-400 hover:text-amber-200 cursor-pointer"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2 pt-1">
+                              <button
+                                type="button"
+                                disabled={reextractingMaterials}
+                                onClick={handleReextractMaterials}
+                                className="px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-amber-700/60 text-amber-200 text-[11px] font-semibold cursor-pointer"
+                              >
+                                {reextractingMaterials ? "Re-extracting PDFs..." : "Re-extract Uploaded PDFs"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleStartDistillationPipeline(true, true, true)}
+                                className="px-3.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-bold cursor-pointer"
+                              >
+                                Proceed Anyway with Hydrogen Low →
+                              </button>
+                            </div>
+                          </div>
+                        )}
 
                         {/* Footer Actions: Raw Outline vs AI Distillation (Sticky on Mobile) */}
                         <div className="sticky bottom-0 bg-zinc-900/95 backdrop-blur-xs pt-3 pb-1 border-t border-zinc-800 flex flex-col sm:flex-row items-center justify-between gap-3 z-10">
@@ -3741,6 +4314,34 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
               </div>
             </div>
 
+            {/* Coverage warning for single manual extraction */}
+            {coverageWarning && coverageWarning.mode === "single" && (
+              <div className="p-3 rounded-xl bg-amber-950/50 border border-amber-700/70 text-xs text-amber-200 space-y-2 animate-in fade-in">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <p className="text-[11px] leading-relaxed">
+                    Week {ingestWeek} has sparse or missing slide/PDF context (&lt;300 chars). Batch Hydrogen Low stays active without escalating to Medium. Upload slides/PDFs above, or confirm below.
+                  </p>
+                </div>
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCoverageWarning(null)}
+                    className="px-3 py-1 rounded-lg bg-zinc-900 border border-zinc-700 text-[11px] text-zinc-300 cursor-pointer"
+                  >
+                    Add Slides First
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleRunExtraction(true)}
+                    className="px-3 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-bold cursor-pointer"
+                  >
+                    Proceed Anyway with Hydrogen Low →
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Modal Action Bar */}
             <div className="flex items-center justify-between pt-3 border-t border-zinc-800">
               <div className="text-[11px] text-zinc-500">
@@ -3764,7 +4365,7 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
                 </button>
                 <button
                   type="button"
-                  onClick={handleRunExtraction}
+                  onClick={() => handleRunExtraction(false)}
                   disabled={extracting || (!slideText && !transcriptText)}
                   className="px-5 py-2 rounded-xl text-xs font-bold bg-violet-600 hover:bg-violet-500 text-white transition flex items-center gap-2 cursor-pointer disabled:opacity-50 shadow-lg shadow-violet-950/50"
                 >
