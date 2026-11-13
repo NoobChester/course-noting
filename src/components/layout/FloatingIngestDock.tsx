@@ -16,7 +16,8 @@ import {
   BookOpen,
   Volume2,
   Maximize2,
-  Minimize2
+  Minimize2,
+  RotateCcw
 } from "lucide-react";
 import { useBackgroundIngest } from "@/context/BackgroundIngestContext";
 
@@ -30,7 +31,8 @@ export function FloatingIngestDock() {
     pauseQueue,
     resumeQueue,
     cancelQueue,
-    clearSession
+    clearSession,
+    retryFailedItems
   } = useBackgroundIngest();
 
   const [showLectureList, setShowLectureList] = useState(false);
@@ -44,6 +46,7 @@ export function FloatingIngestDock() {
   const total = Math.max(1, session.totalCount);
   const done = session.completedCount;
   const percent = session.progressPercent ?? Math.round((done / total) * 100);
+  const failedCount = session.lectures.filter((l) => l.status === "error").length;
 
   // If dock is collapsed into a small floating pill
   if (!dockOpen) {
@@ -242,6 +245,15 @@ export function FloatingIngestDock() {
               <p className="text-[11px] text-zinc-400 mt-1.5 truncate">
                 {session.currentStage || "Processing..."}
               </p>
+
+              {failedCount > 0 && session.lastError && (
+                <div className="mt-2 p-2 rounded-lg bg-rose-950/50 border border-rose-500/40 text-rose-200 text-[11px] leading-snug">
+                  <span className="font-semibold text-rose-300">
+                    {failedCount} failed:
+                  </span>{" "}
+                  {session.lastError}
+                </div>
+              )}
             </div>
 
             {/* Lecture list toggle */}
@@ -259,31 +271,42 @@ export function FloatingIngestDock() {
               </button>
 
               {showLectureList && (
-                <div className="mt-2 max-h-36 overflow-y-auto space-y-1.5 pr-1 text-xs">
+                <div className="mt-2 max-h-44 overflow-y-auto space-y-1.5 pr-1 text-xs">
                   {session.lectures.map((l) => (
                     <div
                       key={l.lessonId}
-                      className="flex items-center justify-between gap-2 p-1.5 rounded-lg bg-zinc-950/50 border border-zinc-800/60 text-[11px]"
+                      className={`p-1.5 rounded-lg bg-zinc-950/50 border text-[11px] ${
+                        l.status === "error"
+                          ? "border-rose-500/40 bg-rose-950/20"
+                          : "border-zinc-800/60"
+                      }`}
                     >
-                      <div className="flex items-center gap-2 truncate">
-                        {l.status === "done" ? (
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                        ) : l.status === "distilling" || l.status === "pulling" ? (
-                          <Loader2 className="w-3.5 h-3.5 text-indigo-400 animate-spin shrink-0" />
-                        ) : l.status === "media_ready" ? (
-                          <Volume2 className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                        ) : l.status === "error" ? (
-                          <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                        ) : (
-                          <Clock className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
-                        )}
-                        <span className="truncate text-zinc-300">
-                          {l.title}
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 truncate">
+                          {l.status === "done" ? (
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          ) : l.status === "distilling" || l.status === "pulling" ? (
+                            <Loader2 className="w-3.5 h-3.5 text-indigo-400 animate-spin shrink-0" />
+                          ) : l.status === "media_ready" ? (
+                            <Volume2 className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                          ) : l.status === "error" ? (
+                            <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                          ) : (
+                            <Clock className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                          )}
+                          <span className="truncate text-zinc-300">
+                            {l.title}
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-zinc-500 shrink-0">
+                          W{l.week}
                         </span>
                       </div>
-                      <span className="text-[10px] text-zinc-500 shrink-0">
-                        W{l.week}
-                      </span>
+                      {l.status === "error" && (l.error || l.progressStage) && (
+                        <p className="mt-1 pl-5 text-[10px] text-rose-300/90 leading-snug break-words">
+                          {l.error || l.progressStage}
+                        </p>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -291,7 +314,7 @@ export function FloatingIngestDock() {
             </div>
 
             {/* Control buttons */}
-            <div className="flex items-center gap-2 pt-2 border-t border-zinc-800/80">
+            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-zinc-800/80">
               {isRunning && !isPaused ? (
                 <button
                   onClick={pauseQueue}
@@ -300,7 +323,7 @@ export function FloatingIngestDock() {
                   <Pause className="w-3.5 h-3.5" />
                   Pause
                 </button>
-              ) : isPaused ? (
+              ) : isPaused && (isRunning || failedCount === 0) ? (
                 <button
                   onClick={resumeQueue}
                   className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md shadow-indigo-900/30 transition"
@@ -309,6 +332,16 @@ export function FloatingIngestDock() {
                   Resume
                 </button>
               ) : null}
+
+              {!isRunning && failedCount > 0 && (
+                <button
+                  onClick={retryFailedItems}
+                  className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-md shadow-rose-900/30 transition"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  Retry Failed ({failedCount})
+                </button>
+              )}
 
               <Link
                 href={`/lectures?course=${session.courseId}`}

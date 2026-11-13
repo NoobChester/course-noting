@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
+import crypto from "node:crypto";
 import { exec } from "child_process";
 import { promisify } from "util";
 import matter from "gray-matter";
 import { fetchUNSWCourseOutline } from "../../courses/outline/route";
-import { distillLongLecture } from "@/lib/lecture-ingest";
+import { distillLongLecture, preprocessTranscriptWithAnchors } from "@/lib/lecture-ingest";
 import { transcribeAudioWithGemini } from "@/lib/gemini-audio";
 import { loadCourseMaterialContext } from "@/lib/material-extractor";
 
@@ -349,42 +350,142 @@ ${lines.slice(0, 30).join("\n")}
   };
 }
 
+function buildUniqueNoteId(week: number, safeMediaId: string): string {
+  const hash = crypto.createHash("sha1").update(safeMediaId).digest("hex").slice(0, 8);
+  return `lecture-w${String(Number(week) || 1).padStart(2, "0")}-${hash}`;
+}
+
+let cachedFfmpegAvailable: boolean | null = null;
+async function checkFfmpegAvailable(): Promise<boolean> {
+  if (cachedFfmpegAvailable !== null) return cachedFfmpegAvailable;
+  try {
+    await execAsync("ffmpeg -version");
+    cachedFfmpegAvailable = true;
+  } catch {
+    cachedFfmpegAvailable = false;
+  }
+  return cachedFfmpegAvailable;
+}
+
+async function resolveRealPlayerMedia(opts: {
+  safeMediaId: string;
+  lessonUrl?: string;
+  echoHost: string;
+  activeCookie: string;
+}): Promise<{
+  resolvedMediaId: string;
+  pageHtml: string;
+  m3u8Url: string | null;
+}> {
+  const { safeMediaId, lessonUrl, echoHost, activeCookie } = opts;
+  const headers = {
+    Cookie: activeCookie,
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+  };
+
+  // Standard 36-char media UUID (not G_... lesson group ID)
+  if (!safeMediaId.startsWith("G_") && /^[0-9a-fA-F-]{36}$/.test(safeMediaId)) {
+    let pageHtml = "";
+    let m3u8Url: string | null = null;
+    if (lessonUrl) {
+      try {
+        const res = await fetch(lessonUrl, { headers });
+        if (res.ok) {
+          pageHtml = await res.text();
+          const m = pageHtml.match(/URI="([^"]*s0q\d+\.m3u8[^"]*)"/i) || pageHtml.match(/https?:\/\/[^"'\s\\]+?\.m3u8[^"'\s\\]*/i);
+          if (m) m3u8Url = m[1] || m[0];
+        }
+      } catch {}
+    }
+    return { resolvedMediaId: safeMediaId, pageHtml, m3u8Url };
+  }
+
+  // G_... lesson group ID: fetch lesson page HTML or syllabus lesson API to uncover real media UUID
+  const targetUrl = lessonUrl || `${echoHost}/lesson/${safeMediaId}/classroom`;
+  try {
+    const res = await fetch(targetUrl, { headers });
+    if (res.ok) {
+      const html = await res.text();
+      const extracted = extractMediaId(html);
+      const m = html.match(/URI="([^"]*s0q\d+\.m3u8[^"]*)"/i) || html.match(/https?:\/\/[^"'\s\\]+?\.m3u8[^"'\s\\]*/i);
+      const m3u8Url = m ? (m[1] || m[0]) : null;
+      if (extracted) {
+        return { resolvedMediaId: extracted, pageHtml: html, m3u8Url };
+      }
+      // Try syllabus media endpoint for the lesson group
+      const syllabusLessonUrl = `${echoHost}/api/ui/lessons/${encodeURIComponent(safeMediaId)}`;
+      try {
+        const lRes = await fetch(syllabusLessonUrl, { headers: { ...headers, Accept: "application/json" } });
+        if (lRes.ok) {
+          const lJson = await lRes.json();
+          const mediaUuid =
+            lJson?.data?.medias?.[0]?.id ||
+            lJson?.medias?.[0]?.id ||
+            extractMediaId(JSON.stringify(lJson));
+          if (mediaUuid) {
+            return { resolvedMediaId: mediaUuid, pageHtml: html, m3u8Url };
+          }
+        }
+      } catch {}
+      return { resolvedMediaId: safeMediaId, pageHtml: html, m3u8Url };
+    }
+  } catch {}
+
+  return { resolvedMediaId: safeMediaId, pageHtml: "", m3u8Url: null };
+}
+
 async function enrichLessonsWithDiskState(lessons: any[], cleanCourse: string): Promise<void> {
-  const courseDir = path.join(COURSES_DIR, cleanCourse);
-  const rawAudioDir = path.join(courseDir, "raw_files", "audio");
-  const rawTranscriptsDir = path.join(courseDir, "raw_files", "transcripts");
-  const lecturesDir = path.join(courseDir, "lectures");
+  const courseDir = path.join(/*turbopackIgnore: true*/ COURSES_DIR, cleanCourse);
+  const rawAudioDir = path.join(/*turbopackIgnore: true*/ courseDir, "raw_files", "audio");
+  const rawTranscriptsDir = path.join(/*turbopackIgnore: true*/ courseDir, "raw_files", "transcripts");
+  const checkpointsDir = path.join(/*turbopackIgnore: true*/ courseDir, "raw_files", "_checkpoints");
+  const lecturesDir = path.join(/*turbopackIgnore: true*/ courseDir, "lectures");
 
   // Clean up any stale .tmp files from previous interrupted downloads
   try {
     const audioFiles = await fs.readdir(rawAudioDir);
     for (const f of audioFiles) {
       if (f.endsWith(".tmp")) {
-        try { await fs.unlink(path.join(rawAudioDir, f)); } catch {}
+        try { await fs.unlink(path.join(/*turbopackIgnore: true*/ rawAudioDir, f)); } catch {}
       }
     }
   } catch {}
 
   let lectureFiles: string[] = [];
+  const parsedNotes: { file: string; id: string; week: number; echo360Url: string; sourceTranscript: string; data: any; content: string }[] = [];
   try {
-    lectureFiles = await fs.readdir(lecturesDir);
+    lectureFiles = (await fs.readdir(lecturesDir)).filter((f) => f.endsWith(".md"));
+    for (const f of lectureFiles) {
+      try {
+        const raw = await fs.readFile(path.join(/*turbopackIgnore: true*/ lecturesDir, f), "utf-8");
+        const parsed = matter(raw);
+        parsedNotes.push({
+          file: f,
+          id: parsed.data.id || f.replace(/\.md$/, ""),
+          week: Number(parsed.data.week) || 1,
+          echo360Url: String(parsed.data.echo360Url || ""),
+          sourceTranscript: String(parsed.data.sourceTranscript || ""),
+          data: parsed.data,
+          content: parsed.content || ""
+        });
+      } catch {}
+    }
   } catch {}
+
+  let checkpointFiles: string[] = [];
+  try {
+    checkpointFiles = await fs.readdir(checkpointsDir);
+  } catch {}
+
+  const ffmpegAvailable = await checkFfmpegAvailable();
 
   for (const l of lessons) {
     const safeId = (l.mediaId || l.lessonId || "").replace(/[^a-zA-Z0-9-_]/g, "");
     if (!safeId) continue;
 
-    const audioFile = path.join(rawAudioDir, `lecture_${safeId}.m4a`);
-    const transcriptFile = path.join(rawTranscriptsDir, `lecture_${safeId}.txt`);
-
-    let noteExists = false;
-    let existingNoteId = "";
-    const shortId = safeId.slice(0, 8);
-    const matchNote = lectureFiles.find((f) => f.includes(shortId) && f.endsWith(".md"));
-    if (matchNote) {
-      noteExists = true;
-      existingNoteId = matchNote.replace(/\.md$/, "");
-    }
+    l.ffmpegAvailable = ffmpegAvailable;
+    const audioFile = path.join(/*turbopackIgnore: true*/ rawAudioDir, `lecture_${safeId}.m4a`);
+    const transcriptFile = path.join(/*turbopackIgnore: true*/ rawTranscriptsDir, `lecture_${safeId}.txt`);
 
     let hasAudio = false;
     try {
@@ -394,41 +495,68 @@ async function enrichLessonsWithDiskState(lessons: any[], cleanCourse: string): 
 
     let hasTranscript = false;
     let transcriptChars = 0;
+    let cueCount = 0;
     try {
-      const stat = await fs.stat(transcriptFile);
-      if (stat.size > 0) {
+      const txt = await fs.readFile(transcriptFile, "utf-8");
+      if (txt.trim().length > 0) {
         hasTranscript = true;
-        transcriptChars = stat.size;
+        transcriptChars = txt.length;
+        cueCount = txt.split("\n").filter((ln) => ln.includes("[")).length;
       }
     } catch {}
 
-    l.transcriptChars = transcriptChars;
+    const cpCount = checkpointFiles.filter((f) => f.startsWith(`${safeId}.part`) && f.endsWith(".json")).length;
 
-    if (noteExists) {
-      l.status = "done";
-      l.progressPercent = 100;
-      l.progressStage = "Ingested";
-      l.hasTranscript = true;
-      l.audioDownloaded = hasAudio;
-      l.noteId = existingNoteId;
+    const uniqueId = buildUniqueNoteId(Number(l.week) || 1, safeId);
+    const shortId = safeId.slice(0, 8);
+    const matchedNote =
+      parsedNotes.find((n) => n.id === uniqueId || n.file === `${uniqueId}.md`) ||
+      parsedNotes.find((n) => n.sourceTranscript === `lecture_${safeId}.txt`) ||
+      parsedNotes.find((n) => l.lessonUrl && n.echo360Url === l.lessonUrl) ||
+      parsedNotes.find((n) => n.week === (Number(l.week) || 1) && n.file.includes(shortId));
+
+    l.transcriptChars = transcriptChars;
+    l.transcriptCueCount = cueCount;
+    l.hasTranscript = hasTranscript;
+    l.audioDownloaded = hasAudio;
+    l.checkpointCount = cpCount;
+
+    if (matchedNote) {
+      l.noteId = matchedNote.id;
+      const noteLooksPdfOnly =
+        Boolean(matchedNote.data?.noTranscript) ||
+        (!hasTranscript && !matchedNote.data?.audioTranscribed && !/\[\d{2}:\d{2}:\d{2}\]/.test(matchedNote.content));
+
+      l.pdfOnly = noteLooksPdfOnly;
+      if (noteLooksPdfOnly) {
+        l.status = "queued";
+        l.progressPercent = 50;
+        l.progressStage = "PDF-Only note saved (needs transcript upgrade)";
+      } else {
+        l.status = "done";
+        l.progressPercent = 100;
+        l.progressStage = "Ingested";
+      }
     } else if (hasAudio && hasTranscript) {
       l.status = "media_ready";
       l.progressPercent = 100;
-      l.progressStage = "✓ Audio & transcript ready";
-      l.hasTranscript = true;
-      l.audioDownloaded = true;
+      l.progressStage = `Transcript (${cueCount} cues) & audio ready`;
     } else if (hasAudio) {
       l.status = "media_ready";
       l.progressPercent = 100;
-      l.progressStage = "✓ Audio ready (Gemini transcription fallback)";
-      l.hasTranscript = false;
-      l.audioDownloaded = true;
+      l.progressStage = "Audio ready (Gemini transcription fallback)";
     } else if (hasTranscript) {
+      l.status = "media_ready";
+      l.progressPercent = 100;
+      l.progressStage = `Transcript ready (${cueCount} cues)`;
+    } else if (cpCount > 0) {
       l.status = "queued";
-      l.progressPercent = 25;
-      l.progressStage = "Transcript ready (audio pending)";
-      l.hasTranscript = true;
-      l.audioDownloaded = false;
+      l.progressPercent = 40;
+      l.progressStage = `Resumable (${cpCount} partial chunks saved)`;
+    } else {
+      l.status = "queued";
+      l.progressPercent = 0;
+      l.progressStage = "Queued for Stage 2 media pull";
     }
   }
 }
@@ -652,11 +780,79 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// POST: Actions (save-session, list-vault, delete-vault-item, clear-vault, pull)
+// POST: Actions (save-session, list-vault, delete-vault-item, clear-vault, pipeline-status, auto-ingest, pull) + multipart lecture media upload
 export async function POST(req: NextRequest) {
   try {
+    const contentType = req.headers.get("content-type") || "";
+
+    // Manual per-lecture .m4a/.mp3 or .vtt/.srt/.txt upload in Stage 2
+    if (contentType.includes("multipart/form-data")) {
+      const formData = await req.formData();
+      const courseId = String(formData.get("courseId") || "math3701");
+      const mediaId = String(formData.get("mediaId") || formData.get("lessonId") || "lecture");
+      const file = formData.get("file") as File | null;
+      if (!file) {
+        return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
+      }
+
+      const cleanCourse = courseId.toUpperCase().replace(/[^A-Z0-9]/g, "");
+      const safeMediaId = mediaId.replace(/[^a-zA-Z0-9-_]/g, "");
+      const rawDir = path.join(/*turbopackIgnore: true*/ COURSES_DIR, cleanCourse, "raw_files");
+      const audioDir = path.join(/*turbopackIgnore: true*/ rawDir, "audio");
+      const transcriptsDir = path.join(/*turbopackIgnore: true*/ rawDir, "transcripts");
+      await fs.mkdir(audioDir, { recursive: true });
+      await fs.mkdir(transcriptsDir, { recursive: true });
+
+      const buffer = Buffer.from(await file.arrayBuffer());
+      const ext = path.extname(file.name).toLowerCase();
+
+      if ([".vtt", ".srt", ".txt"].includes(ext)) {
+        const cleaned = preprocessTranscriptWithAnchors(buffer.toString("utf-8"));
+        const cueCount = cleaned.split("\n").filter((ln) => ln.includes("[")).length;
+        const outPath = path.join(/*turbopackIgnore: true*/ transcriptsDir, `lecture_${safeMediaId}.txt`);
+        await fs.writeFile(outPath, cleaned || buffer.toString("utf-8"), "utf-8");
+        return NextResponse.json({
+          success: true,
+          kind: "transcript",
+          cueCount,
+          chars: cleaned.length,
+          transcriptFile: `lecture_${safeMediaId}.txt`
+        });
+      }
+
+      if ([".m4a", ".mp3", ".wav", ".aac", ".ogg", ".mp4"].includes(ext)) {
+        const outPath = path.join(/*turbopackIgnore: true*/ audioDir, `lecture_${safeMediaId}.m4a`);
+        await fs.writeFile(outPath, buffer);
+        return NextResponse.json({
+          success: true,
+          kind: "audio",
+          size: buffer.length,
+          audioFile: `lecture_${safeMediaId}.m4a`
+        });
+      }
+
+      return NextResponse.json(
+        { error: `Unsupported lecture media format "${ext}". Upload .vtt, .srt, .txt, .m4a, or .mp3.` },
+        { status: 400 }
+      );
+    }
+
     const body = await req.json();
     const { action } = body;
+
+    // ACTION: Refresh disk pipeline status for Stage 1-4 UI
+    if (action === "pipeline-status") {
+      const cleanCourse = (body.courseId || "math3701").toUpperCase().replace(/[^A-Z0-9]/g, "");
+      const lessons = Array.isArray(body.lessons) ? body.lessons.map((l: any) => ({ ...l })) : [];
+      await enrichLessonsWithDiskState(lessons, cleanCourse);
+      const ffmpegAvailable = await checkFfmpegAvailable();
+      return NextResponse.json({
+        success: true,
+        courseId: cleanCourse,
+        ffmpegAvailable,
+        lectures: lessons
+      });
+    }
 
     // ACTION: Save Session (Ephemeral by default, or persistent to Vault if persistToDisk=true)
     if (action === "save-session") {
@@ -1134,31 +1330,44 @@ export async function POST(req: NextRequest) {
         } catch {}
       }
 
-      const transcriptUrl = `${echoHost}/api/ui/echoplayer/media/${safeMediaId}/transcript`;
-      try {
-        const trRes = await fetch(transcriptUrl, {
-          headers: {
-            Cookie: activeCookie,
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-          }
-        });
+      const resolved = await resolveRealPlayerMedia({
+        safeMediaId,
+        lessonUrl,
+        echoHost,
+        activeCookie
+      });
+      const candidateIds = Array.from(new Set([resolved.resolvedMediaId, safeMediaId].filter(Boolean)));
 
-        if (trRes.ok) {
-          const trJson = await trRes.json();
-          const parsed = parseEcho360Transcript(trJson);
-          return NextResponse.json({
-            success: true,
-            hasTranscript: parsed.cueCount > 0,
-            cueCount: parsed.cueCount,
-            preview: parsed.lines.slice(0, 5).join("\n"),
-            fullText: parsed.fullText
+      try {
+        for (const cid of candidateIds) {
+          const transcriptUrl = `${echoHost}/api/ui/echoplayer/media/${cid}/transcript`;
+          const trRes = await fetch(transcriptUrl, {
+            headers: {
+              Cookie: activeCookie,
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            }
           });
+
+          if (trRes.ok) {
+            const trJson = await trRes.json();
+            const parsed = parseEcho360Transcript(trJson);
+            if (parsed.cueCount > 0) {
+              return NextResponse.json({
+                success: true,
+                resolvedMediaId: cid,
+                hasTranscript: true,
+                cueCount: parsed.cueCount,
+                preview: parsed.lines.slice(0, 5).join("\n"),
+                fullText: parsed.fullText
+              });
+            }
+          }
         }
       } catch (err: any) {
         return NextResponse.json({ error: err.message }, { status: 500 });
       }
 
-      return NextResponse.json({ success: true, hasTranscript: false, cueCount: 0 });
+      return NextResponse.json({ success: true, hasTranscript: false, cueCount: 0, resolvedMediaId: resolved.resolvedMediaId });
     }
 
     // ACTION: Auto-Ingest Single Lecture in Batch Queue (Supports two-phase pipeline)
@@ -1229,84 +1438,134 @@ export async function POST(req: NextRequest) {
       if (phase === "download-media" || phase === "all") {
         let activeCookie = await resolveActiveCookie(req, clientCookieHeader, cleanCourse);
         if (!activeCookie) {
-          return NextResponse.json({ error: "Missing Echo360 session authentication. Please connect your session in Step 1." }, { status: 401 });
+          return NextResponse.json({ error: "Missing Echo360 session authentication. Please connect your Echo360 session first." }, { status: 401 });
         }
 
-        // Fetch transcript if not already saved
+        const resolved = await resolveRealPlayerMedia({
+          safeMediaId,
+          lessonUrl,
+          echoHost,
+          activeCookie
+        });
+
+        // Fetch transcript if not already saved (using real player mediaId UUID when G_ lessonId was given)
         if (!transcriptText) {
-          const transcriptUrl = `${echoHost}/api/ui/echoplayer/media/${safeMediaId}/transcript`;
-          try {
-            const trRes = await fetch(transcriptUrl, {
-              headers: {
-                Cookie: activeCookie,
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+          const candidateIds = Array.from(new Set([resolved.resolvedMediaId, safeMediaId].filter(Boolean)));
+          for (const cid of candidateIds) {
+            const transcriptUrl = `${echoHost}/api/ui/echoplayer/media/${cid}/transcript`;
+            try {
+              const trRes = await fetch(transcriptUrl, {
+                headers: {
+                  Cookie: activeCookie,
+                  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                }
+              });
+              if (trRes.ok) {
+                const trJson = await trRes.json();
+                const parsed = parseEcho360Transcript(trJson);
+                if (parsed.fullText && parsed.cueCount > 0) {
+                  transcriptText = parsed.fullText;
+                  cueCount = parsed.cueCount;
+                  await fs.writeFile(transcriptOutPath, transcriptText, "utf-8");
+                  break;
+                }
               }
-            });
-            if (trRes.ok) {
-              const trJson = await trRes.json();
-              const parsed = parseEcho360Transcript(trJson);
-              transcriptText = parsed.fullText;
-              cueCount = parsed.cueCount;
-              if (transcriptText) {
-                await fs.writeFile(transcriptOutPath, transcriptText, "utf-8");
-              }
+            } catch (trErr) {
+              console.warn("Could not fetch transcript:", trErr);
             }
-          } catch (trErr) {
-            console.warn("Could not fetch transcript:", trErr);
           }
         }
 
-        // Download audio stream via ffmpeg into temporary file first, then atomically commit
+        // Download audio stream via ffmpeg if installed (into temporary file first, then atomically commit)
+        const ffmpegAvailable = await checkFfmpegAvailable();
+        let ffmpegError: string | null = null;
         const audioTmpPath = `${audioOutPath}.tmp`;
         try { await fs.unlink(audioTmpPath); } catch {}
 
-        if (downloadAudio && !audioDownloaded && lessonUrl) {
-          try {
-            const pageRes = await fetch(lessonUrl, {
-              headers: {
-                Cookie: activeCookie,
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-              }
-            });
-            if (pageRes.ok) {
-              const pageHtml = await pageRes.text();
-              const m3u8Match = pageHtml.match(/URI="([^"]*s0q\d+\.m3u8[^"]*)"/i) || pageHtml.match(/https?:\/\/[^"'\s\\]+?\.m3u8[^"'\s\\]*/i);
-              if (m3u8Match) {
-                const m3u8Url = m3u8Match[1] || m3u8Match[0];
-                const cookieArg = activeCookie ? `-headers "Cookie: ${activeCookie}\r\n"` : "";
-                const cmd = `ffmpeg -y ${cookieArg} -i "${m3u8Url}" -vn -c:a copy "${audioTmpPath}"`;
-                await execAsync(cmd);
-                
-                // Verify tmp file exists and is healthy (>20KB) before committing
-                const stat = await fs.stat(audioTmpPath);
-                if (stat.size > 20000) {
-                  await fs.rename(audioTmpPath, audioOutPath);
-                  audioDownloaded = true;
-                } else {
-                  try { await fs.unlink(audioTmpPath); } catch {}
-                  console.warn("Downloaded audio was truncated or empty (<20KB)");
+        if (downloadAudio && !audioDownloaded && ffmpegAvailable) {
+          let m3u8Url = resolved.m3u8Url;
+          if (!m3u8Url && lessonUrl) {
+            try {
+              const pageRes = await fetch(lessonUrl, {
+                headers: {
+                  Cookie: activeCookie,
+                  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
                 }
+              });
+              if (pageRes.ok) {
+                const pageHtml = await pageRes.text();
+                const m3u8Match = pageHtml.match(/URI="([^"]*s0q\d+\.m3u8[^"]*)"/i) || pageHtml.match(/https?:\/\/[^"'\s\\]+?\.m3u8[^"'\s\\]*/i);
+                if (m3u8Match) m3u8Url = m3u8Match[1] || m3u8Match[0];
               }
-            }
-          } catch (audioErr) {
-            console.warn("Audio stream download error:", audioErr);
-            try { await fs.unlink(audioTmpPath); } catch {}
+            } catch {}
           }
+
+          if (m3u8Url) {
+            try {
+              const cookieArg = activeCookie ? `-headers "Cookie: ${activeCookie}\r\n"` : "";
+              const cmd = `ffmpeg -y ${cookieArg} -i "${m3u8Url}" -vn -c:a copy "${audioTmpPath}"`;
+              await execAsync(cmd);
+              const stat = await fs.stat(audioTmpPath);
+              if (stat.size > 20000) {
+                await fs.rename(audioTmpPath, audioOutPath);
+                audioDownloaded = true;
+              } else {
+                try { await fs.unlink(audioTmpPath); } catch {}
+                ffmpegError = "Downloaded audio stream was empty (<20KB).";
+              }
+            } catch (audioErr: any) {
+              ffmpegError = audioErr?.message || "FFmpeg failed to record stream.";
+              try { await fs.unlink(audioTmpPath); } catch {}
+            }
+          } else {
+            ffmpegError = "Could not find an HLS .m3u8 audio stream on the Echo360 lesson page.";
+          }
+        } else if (downloadAudio && !audioDownloaded && !ffmpegAvailable) {
+          ffmpegError = "ffmpeg is not installed on PATH for .m4a downloads.";
         }
 
         if (phase === "download-media") {
+          const hasTranscript = transcriptText.trim().length > 0;
+          const mediaReady = hasTranscript || audioDownloaded;
+          const warning = !mediaReady
+            ? !ffmpegAvailable
+              ? "0 Echo360 VTT captions found & ffmpeg not installed (drop .m4a/.vtt manually or install ffmpeg)."
+              : ffmpegError || "0 Echo360 VTT captions found and no .m4a stream could be downloaded."
+            : !audioDownloaded && ffmpegError
+            ? `Transcript saved (${cueCount} cues); audio skipped (${ffmpegError})`
+            : undefined;
+
           return NextResponse.json({
             success: true,
             phase: "download-media",
-            mediaReady: true,
+            mediaReady,
             cueCount,
             audioDownloaded,
-            hasTranscript: transcriptText.length > 0,
-            transcriptFile: `lecture_${safeMediaId}.txt`,
+            ffmpegAvailable,
+            hasTranscript,
+            needsManualMedia: !mediaReady,
+            resolvedMediaId: resolved.resolvedMediaId,
+            warning,
+            transcriptFile: hasTranscript ? `lecture_${safeMediaId}.txt` : null,
             audioFile: audioDownloaded ? audioFileName : null,
-            message: `Media downloaded for ${title || safeMediaId}`
+            message: mediaReady
+              ? `Ready: ${hasTranscript ? `${cueCount} VTT cues` : ""}${hasTranscript && audioDownloaded ? " + " : ""}${audioDownloaded ? ".m4a audio" : ""}`
+              : warning
           });
         }
+      }
+
+      // Phase: "distill-note" or "all"
+      const allowPdfOnly = Boolean(body.allowPdfOnly);
+      if (!transcriptText.trim() && !audioDownloaded && !allowPdfOnly) {
+        return NextResponse.json(
+          {
+            error:
+              "Needs Transcript or Audio: No Echo360 transcript (.txt) or audio (.m4a) exists on disk for this recording. Pull media in Stage 2, drop a .vtt/.m4a file, or enable 'Allow PDF-Only'.",
+            needsMedia: true
+          },
+          { status: 422 }
+        );
       }
 
       // Phase: "distill-note" or "all"
@@ -1392,8 +1651,9 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      const noteId = `lecture-w${String(week).padStart(2, "0")}-${safeMediaId.slice(0, 8)}`;
-      const notePath = path.join(lecturesDir, `${noteId}.md`);
+      const noteId = buildUniqueNoteId(Number(week) || 1, safeMediaId);
+      const notePath = path.join(/*turbopackIgnore: true*/ lecturesDir, `${noteId}.md`);
+      const noTranscript = !transcriptText.trim() && !audioTranscribed;
 
       const frontmatter: Record<string, any> = {
         id: noteId,
@@ -1408,6 +1668,7 @@ export async function POST(req: NextRequest) {
         aiDistilled: Boolean(aiModelUsed),
         aiModel: aiModelUsed || "None (Raw Transcript Outline)",
         audioTranscribed: audioTranscribed || undefined,
+        noTranscript: noTranscript || undefined,
         partsProcessed: synthesized.partsProcessed || undefined,
         contextWarning: synthesized.contextWarning || undefined,
         createdAt: new Date().toISOString(),

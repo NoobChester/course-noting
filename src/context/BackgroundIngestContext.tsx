@@ -33,6 +33,13 @@ export interface IngestLectureItem {
   transcriptPreview?: string;
   progressPercent?: number;
   progressStage?: string;
+  ffmpegAvailable?: boolean;
+  needsMedia?: boolean;
+  allowPdfOnly?: boolean;
+  pdfOnly?: boolean;
+  checkpointCount?: number;
+  hasTranscript?: boolean;
+  audioDownloaded?: boolean;
 }
 
 export interface IngestSession {
@@ -90,6 +97,7 @@ interface BackgroundIngestContextType {
   resumeInterruptedSession: () => Promise<void>;
   dismissInterruptedSession: () => void;
   clearSession: () => void;
+  retryFailedItems: () => Promise<void>;
   subscribeToNoteUpdates: (callback: (noteId?: string) => void) => () => void;
 }
 
@@ -281,11 +289,16 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
                 requireAi,
                 outlineTopic: item.outlineTopic,
                 outlineDescription: item.outlineDescription,
+                allowPdfOnly: Boolean(item.allowPdfOnly),
                 cookieHeader: ephemeralCookie || undefined,
                 aiSettings
               })
             });
             data = await res.json();
+
+            if (res.status === 422 || data?.needsMedia) {
+              break;
+            }
 
             const transientHttp = res.status === 429 || res.status === 502 || res.status === 503 || res.status === 504;
             const transientMsg =
@@ -364,19 +377,22 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
             await new Promise((r) => setTimeout(r, 1500));
           }
         } else {
+          const errMsg = data.error || "Distillation failed";
           currentSession = {
             ...currentSession,
             errorCount: currentSession.errorCount + 1,
-            lastError: data.error || "Distillation failed",
-            currentStage: `⚠️ Error on ${item.title}: ${data.error || "Failed"}`,
+            lastError: errMsg,
+            currentStage: `⚠️ Error on ${item.title}: ${errMsg}`,
             updatedAt: new Date().toISOString(),
             lectures: currentSession.lectures.map((l, idx) =>
               idx === i
                 ? {
                     ...l,
                     status: "error",
+                    error: errMsg,
+                    needsMedia: Boolean(data?.needsMedia),
                     progressPercent: 0,
-                    progressStage: data.error || "Distillation failed"
+                    progressStage: errMsg
                   }
                 : l
             )
@@ -385,10 +401,11 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
           saveSessionToStorage(currentSession);
         }
       } catch (err: any) {
+        const netErr = err.message || "Network error";
         currentSession = {
           ...currentSession,
           errorCount: currentSession.errorCount + 1,
-          lastError: err.message || "Network error",
+          lastError: netErr,
           currentStage: `⚠️ Network error on ${item.title}`,
           updatedAt: new Date().toISOString(),
           lectures: currentSession.lectures.map((l, idx) =>
@@ -396,8 +413,9 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
               ? {
                   ...l,
                   status: "error",
+                  error: netErr,
                   progressPercent: 0,
-                  progressStage: err.message || "Network error"
+                  progressStage: netErr
                 }
               : l
           )
@@ -507,25 +525,65 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
         });
 
         const data = await res.json();
-        if (res.ok) {
+        if (res.ok && data.mediaReady === false) {
+          const warnMsg =
+            data.warning ||
+            "0 Echo360 VTT cues & audio unavailable — drop .m4a or .vtt in Stage 2 or enable PDF-Only override";
+          currentSession = {
+            ...currentSession,
+            errorCount: currentSession.errorCount + 1,
+            lastError: warnMsg,
+            currentStage: `⚠️ No media for ${item.title}: ${warnMsg}`,
+            updatedAt: new Date().toISOString(),
+            lectures: currentSession.lectures.map((l, idx) =>
+              idx === i
+                ? {
+                    ...l,
+                    status: "error",
+                    error: warnMsg,
+                    needsMedia: true,
+                    hasTranscript: Boolean(data.hasTranscript),
+                    audioDownloaded: Boolean(data.audioDownloaded),
+                    transcriptCueCount: data.cueCount || 0,
+                    ffmpegAvailable: data.ffmpegAvailable,
+                    progressPercent: 0,
+                    progressStage: warnMsg
+                  }
+                : l
+            )
+          };
+          setSession(currentSession);
+          saveSessionToStorage(currentSession);
+        } else if (res.ok) {
           const newDone = currentSession.lectures.filter(
             (l, idx) => idx === i || l.status === "media_ready" || l.status === "done"
           ).length;
           const newPercent = Math.round((newDone / Math.max(1, totalCount)) * 100);
+          const readyLabel = data.audioDownloaded && data.cueCount > 0
+            ? `✓ Transcript (${data.cueCount} cues) + Audio ready`
+            : data.cueCount > 0
+            ? `✓ Transcript (${data.cueCount} cues) ready`
+            : "✓ Audio ready";
 
           currentSession = {
             ...currentSession,
             completedCount: newDone,
             progressPercent: newPercent,
-            currentStage: `✓ Audio downloaded for ${item.title}`,
+            currentStage: `${readyLabel} for ${item.title}`,
             updatedAt: new Date().toISOString(),
             lectures: currentSession.lectures.map((l, idx) =>
               idx === i
                 ? {
                     ...l,
                     status: "media_ready",
+                    error: undefined,
+                    needsMedia: false,
+                    hasTranscript: Boolean(data.hasTranscript || data.cueCount > 0),
+                    audioDownloaded: Boolean(data.audioDownloaded),
+                    transcriptCueCount: data.cueCount ?? l.transcriptCueCount,
+                    ffmpegAvailable: data.ffmpegAvailable,
                     progressPercent: 100,
-                    progressStage: "✓ Audio ready"
+                    progressStage: readyLabel
                   }
                 : l
             )
@@ -533,10 +591,11 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
           setSession(currentSession);
           saveSessionToStorage(currentSession);
         } else {
+          const dlErr = data.error || "Media download failed";
           currentSession = {
             ...currentSession,
             errorCount: currentSession.errorCount + 1,
-            lastError: data.error || "Media download failed",
+            lastError: dlErr,
             currentStage: `⚠️ Download error on ${item.title}`,
             updatedAt: new Date().toISOString(),
             lectures: currentSession.lectures.map((l, idx) =>
@@ -544,8 +603,9 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
                 ? {
                     ...l,
                     status: "error",
+                    error: dlErr,
                     progressPercent: 0,
-                    progressStage: data.error || "Download error"
+                    progressStage: dlErr
                   }
                 : l
             )
@@ -554,10 +614,11 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
           saveSessionToStorage(currentSession);
         }
       } catch (err: any) {
+        const netErr = err.message || "Network error";
         currentSession = {
           ...currentSession,
           errorCount: currentSession.errorCount + 1,
-          lastError: err.message || "Network error",
+          lastError: netErr,
           currentStage: `⚠️ Network error downloading ${item.title}`,
           updatedAt: new Date().toISOString(),
           lectures: currentSession.lectures.map((l, idx) =>
@@ -565,8 +626,9 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
               ? {
                   ...l,
                   status: "error",
+                  error: netErr,
                   progressPercent: 0,
-                  progressStage: err.message || "Network error"
+                  progressStage: netErr
                 }
               : l
           )
@@ -822,6 +884,60 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
     setSession(null);
   };
 
+  // Retry only failed items in the current session without resetting completed items
+  const retryFailedItems = async () => {
+    const active = sessionRef.current || interruptedSession;
+    if (!active || isRunning) return;
+
+    const hasFailed = active.lectures.some((l) => l.status === "error");
+    if (!hasFailed) return;
+
+    const resetLectures = active.lectures.map((l) =>
+      l.status === "error"
+        ? {
+            ...l,
+            selected: true,
+            status: "queued" as const,
+            error: undefined,
+            progressPercent: 0,
+            progressStage: "Retrying..."
+          }
+        : l
+    );
+
+    const shouldDownload =
+      active.phase === "downloading" ||
+      (active.phase === "idle" &&
+        (active.id.startsWith("download_") ||
+          active.lectures.some((l) => l.status === "error" && l.needsMedia) ||
+          (!active.lectures.some((l) => l.status === "done") &&
+            active.lectures.some((l) => l.status === "media_ready"))));
+
+    const retrySession: IngestSession = {
+      ...active,
+      phase: shouldDownload ? "downloading" : "distilling",
+      status: "running",
+      errorCount: 0,
+      lastError: undefined,
+      updatedAt: new Date().toISOString(),
+      currentStage: shouldDownload
+        ? "Retrying failed Stage 2 media downloads..."
+        : "Retrying failed Stage 3 distillations...",
+      lectures: resetLectures
+    };
+
+    setSession(retrySession);
+    saveSessionToStorage(retrySession);
+    setHasIncompleteSession(false);
+    setInterruptedSession(null);
+
+    if (shouldDownload) {
+      await runDownloadLoop(retrySession, active.id.startsWith("pull_distill_"));
+    } else {
+      await runDistillationLoop(retrySession);
+    }
+  };
+
   // Clear Session
   const clearSession = () => {
     cancelQueue();
@@ -851,6 +967,7 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
         resumeInterruptedSession,
         dismissInterruptedSession,
         clearSession,
+        retryFailedItems,
         subscribeToNoteUpdates
       }}
     >
