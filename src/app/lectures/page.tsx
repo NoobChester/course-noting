@@ -56,6 +56,7 @@ import {
   X
 } from "lucide-react";
 import { SettingsModal } from "@/components/layout/SettingsModal";
+import { PipelineStagesPanel } from "@/components/lectures/PipelineStagesPanel";
 import { useBackgroundIngest, IngestLectureItem } from "@/context/BackgroundIngestContext";
 import {
   isLocalStudio,
@@ -92,7 +93,7 @@ export default function LecturesPage() {
   const [isLocal, setIsLocal] = useState(false);
   const [showCapabilityDetails, setShowCapabilityDetails] = useState(false);
   const [mobileTab, setMobileTab] = useState<"list" | "viewer">("viewer");
-  const [workspaceTab, setWorkspaceTab] = useState<"lectures" | "notebook">("lectures");
+  const [workspaceTab, setWorkspaceTab] = useState<"lectures" | "pipeline" | "notebook">("lectures");
 
   // Stage 2 Course Notebook Compiler & Grounded Q&A state
   const [notebookStats, setNotebookStats] = useState<{
@@ -1169,15 +1170,17 @@ export default function LecturesPage() {
       const rawLectures = Array.isArray(data.lectures) ? data.lectures : [];
       const mapped = rawLectures.map((l: any) => ({
         ...l,
-        selected: true,
-        status: "queued" as const,
-        transcriptStatus: "loading" as const
+        selected: l.status === "done" && !l.pdfOnly ? false : true,
+        status: (l.status || "queued") as IngestLectureItem["status"],
+        transcriptStatus: (l.transcriptStatus ||
+          (l.hasTranscript ? "ready" : "loading")) as IngestLectureItem["transcriptStatus"]
       }));
       setDiscoveredLectures(mapped);
 
-      // Automatically pull transcripts in the background!
-      if (mapped.length > 0) {
-        fetchTranscriptsInBackground(mapped);
+      // Automatically pull transcripts in the background for items not already cached on disk
+      const needQuickTranscript = mapped.filter((l: any) => !l.hasTranscript);
+      if (needQuickTranscript.length > 0) {
+        fetchTranscriptsInBackground(needQuickTranscript);
       }
     } catch (err: any) {
       setCourseOutline(null);
@@ -1769,18 +1772,22 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
           <button
             type="button"
             onClick={() => {
-              setIngestTab("echo360");
-              setIngestModalOpen(true);
+              if (courseId) {
+                setWorkspaceTab("pipeline");
+              } else {
+                setIngestTab("echo360");
+                setIngestModalOpen(true);
+              }
             }}
             className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 shadow-lg cursor-pointer ${
               isLocal
                 ? "bg-violet-600 hover:bg-violet-500 text-white shadow-violet-950/50"
                 : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
             }`}
-            title="Auto-pull lecture recording or drop transcript"
+            title="Open the resumable 4-stage Echo360 & PDF pipeline"
           >
             <Sparkles className="w-4 h-4 text-violet-200" />
-            <span>⚡ Guided Auto-Pull / Ingest</span>
+            <span>⚡ 4-Stage Pipeline / Auto-Pull</span>
           </button>
         </div>
       </div>
@@ -1806,13 +1813,17 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
             <button
               type="button"
               onClick={() => {
-                setIngestTab("echo360");
-                setIngestModalOpen(true);
+                if (courseId) {
+                  setWorkspaceTab("pipeline");
+                } else {
+                  setIngestTab("echo360");
+                  setIngestModalOpen(true);
+                }
               }}
               className="px-3.5 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold flex items-center gap-1.5 transition shadow-lg shadow-violet-950/50 cursor-pointer"
             >
               <Sparkles className="w-3.5 h-3.5" />
-              <span>⚡ Guided Auto-Pull (Echo360)</span>
+              <span>⚡ 4-Stage Pipeline (Echo360)</span>
             </button>
             <button
               type="button"
@@ -2046,10 +2057,10 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
         )}
       </div>
 
-      {/* Top Workspace Tabs: Lectures & Audio vs Stage 2 Course Notebook */}
+      {/* Top Workspace Tabs: Lectures & Audio vs 4-Stage Pipeline vs Course Notebook */}
       {courseId && (
         <div className="flex flex-wrap items-center justify-between gap-3 mb-5 p-1.5 rounded-2xl bg-zinc-900/90 border border-zinc-800 shadow-sm">
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             <button
               type="button"
               onClick={() => setWorkspaceTab("lectures")}
@@ -2061,6 +2072,18 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
             >
               <Mic className="w-3.5 h-3.5" />
               <span>Lectures &amp; Audio ({lectures.length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setWorkspaceTab("pipeline")}
+              className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer ${
+                workspaceTab === "pipeline"
+                  ? "bg-cyan-600 text-white shadow-md"
+                  : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/70"
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span>4-Stage Pipeline</span>
             </button>
             <button
               type="button"
@@ -2091,7 +2114,32 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
         </div>
       )}
 
-      {workspaceTab === "notebook" && courseId ? (
+      {workspaceTab === "pipeline" && courseId ? (
+        <PipelineStagesPanel
+          courseId={courseId}
+          isLocal={isLocal}
+          discoveredLectures={discoveredLectures}
+          setDiscoveredLectures={setDiscoveredLectures}
+          sectionUrl={sectionUrl}
+          setSectionUrl={setSectionUrl}
+          echoSessionStatus={echoSessionStatus}
+          discoveringSection={discoveringSection}
+          discoveryError={autoPullError}
+          onDiscoverLectures={handleDiscoverLectures}
+          onOpenEchoSessionSetup={() => {
+            setIngestTab("echo360");
+            setShowSessionSetup(true);
+            setIngestModalOpen(true);
+          }}
+          onOpenSettings={() => setIsSettingsOpen(true)}
+          onOpenNotebookTab={() => {
+            setWorkspaceTab("notebook");
+            loadNotebookData(courseId);
+          }}
+          onRefreshCourseData={() => loadCourseData(courseId)}
+          settingsOpen={isSettingsOpen}
+        />
+      ) : workspaceTab === "notebook" && courseId ? (
         <div className="space-y-6 animate-in fade-in duration-150">
           {/* Course Notebook Readiness & Compiler Card */}
           <div className="p-5 sm:p-6 rounded-2xl bg-zinc-900/70 border border-zinc-800 space-y-4 shadow-xl">
@@ -2361,13 +2409,12 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
               <button
                 type="button"
                 onClick={() => {
-                  setIngestTab("echo360");
-                  setIngestModalOpen(true);
+                  setWorkspaceTab("pipeline");
                 }}
                 className="px-3.5 py-1.5 rounded-lg bg-violet-600/80 hover:bg-violet-600 text-white font-semibold text-xs inline-flex items-center gap-1.5 transition cursor-pointer mt-1"
               >
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>Ingest Lectures</span>
+                <span>Open 4-Stage Pipeline</span>
               </button>
             </div>
           ) : (
@@ -2768,6 +2815,23 @@ For problem sheet question 3, notice that you can factor the denominator as (z^2
             {/* TAB 1: GUI-GUIDED AUTO-PULL FROM ECHO360 */}
             {ingestTab === "echo360" && (
               <div className="space-y-4 animate-in fade-in duration-150">
+                {courseId && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-xl bg-cyan-950/30 border border-cyan-500/30 text-xs text-cyan-200">
+                    <span>
+                      Want independent, resumable stages with PDF check, manual .m4a drop, and per-lecture retry?
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIngestModalOpen(false);
+                        setWorkspaceTab("pipeline");
+                      }}
+                      className="px-3 py-1 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-[11px] transition cursor-pointer shrink-0"
+                    >
+                      Open 4-Stage Pipeline →
+                    </button>
+                  </div>
+                )}
                 {/* Session Authentication Bar */}
                 <div
                   className={`p-4 rounded-xl border space-y-3 transition ${
