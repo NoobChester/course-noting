@@ -8,7 +8,7 @@ import React, {
   useRef,
   useCallback
 } from "react";
-import { loadClientAiSettings, normalizeAiPayload } from "@/lib/ai-settings";
+import { loadClientAiSettings, normalizeBatchAiPayload } from "@/lib/ai-settings";
 
 export interface IngestLectureItem {
   lessonId: string;
@@ -22,6 +22,9 @@ export interface IngestLectureItem {
   status: "queued" | "pulling" | "media_ready" | "distilling" | "done" | "error";
   error?: string;
   insightsCount?: number;
+  audioTranscribed?: boolean;
+  partsProcessed?: number;
+  contextWarning?: string;
   outlineTopic?: string;
   outlineDescription?: string;
   outlineDateRange?: string;
@@ -68,6 +71,13 @@ interface BackgroundIngestContextType {
     echoAudioOnly?: boolean
   ) => Promise<void>;
   startDistillationQueue: (
+    courseId: string,
+    lectures: IngestLectureItem[],
+    requireAi: boolean,
+    aiSettings?: any,
+    echoAudioOnly?: boolean
+  ) => Promise<void>;
+  startPullThenDistill: (
     courseId: string,
     lectures: IngestLectureItem[],
     requireAi: boolean,
@@ -242,39 +252,92 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
         if (ephemeralCookie) headers["x-echo-cookie"] = ephemeralCookie;
         if (ephemeralUrl) headers["x-echo-section-url"] = ephemeralUrl;
 
-        const res = await fetch("/api/lectures/echo360", {
-          method: "POST",
-          headers,
-          body: JSON.stringify({
-            action: "auto-ingest",
-            phase: "distill-note",
-            courseId,
-            lessonId: item.lessonId,
-            mediaId: item.mediaId,
-            title: item.title,
-            week: item.week,
-            date: item.date,
-            lessonUrl: item.lessonUrl,
-            downloadAudio: echoAudioOnly,
-            autoDistill: requireAi,
-            requireAi,
-            outlineTopic: item.outlineTopic,
-            outlineDescription: item.outlineDescription,
-            cookieHeader: ephemeralCookie || undefined,
-            aiSettings
-          })
-        });
+        const retryDelaysMs = [8000, 20000, 35000];
+        let res: Response | null = null;
+        let data: any = null;
+        let lastErr: any = null;
 
-        const data = await res.json();
+        for (let attempt = 0; attempt <= retryDelaysMs.length; attempt++) {
+          if (isCancelledRef.current) break;
+          await checkWaitWhilePaused();
+          if (isCancelledRef.current) break;
+
+          try {
+            res = await fetch("/api/lectures/echo360", {
+              method: "POST",
+              headers,
+              body: JSON.stringify({
+                action: "auto-ingest",
+                phase: "distill-note",
+                courseId,
+                lessonId: item.lessonId,
+                mediaId: item.mediaId,
+                title: item.title,
+                week: item.week,
+                date: item.date,
+                lessonUrl: item.lessonUrl,
+                downloadAudio: echoAudioOnly,
+                autoDistill: requireAi,
+                requireAi,
+                outlineTopic: item.outlineTopic,
+                outlineDescription: item.outlineDescription,
+                cookieHeader: ephemeralCookie || undefined,
+                aiSettings
+              })
+            });
+            data = await res.json();
+
+            const transientHttp = res.status === 429 || res.status === 502 || res.status === 503 || res.status === 504;
+            const transientMsg =
+              typeof data?.error === "string" && /429|rate limit|quota|timeout|temporarily/i.test(data.error);
+
+            if (res.ok || (!transientHttp && !transientMsg) || attempt === retryDelaysMs.length) {
+              break;
+            }
+          } catch (fetchErr: any) {
+            lastErr = fetchErr;
+            if (attempt === retryDelaysMs.length) {
+              throw fetchErr;
+            }
+          }
+
+          const delay = retryDelaysMs[attempt] ?? 20000;
+          currentSession = {
+            ...currentSession,
+            currentStage: `Rate-limited or busy on ${item.title} — retrying in ${Math.round(delay / 1000)}s...`,
+            updatedAt: new Date().toISOString(),
+            lectures: currentSession.lectures.map((l, idx) =>
+              idx === i
+                ? {
+                    ...l,
+                    progressStage: `Retrying (${attempt + 1}/${retryDelaysMs.length}) after ${Math.round(delay / 1000)}s...`
+                  }
+                : l
+            )
+          };
+          setSession(currentSession);
+          saveSessionToStorage(currentSession);
+          await new Promise((r) => setTimeout(r, delay));
+        }
+
+        if (isCancelledRef.current) break;
+        if (!res) throw lastErr || new Error("No response from server");
+
         if (res.ok) {
           const newDone = currentSession.lectures.filter((l, idx) => idx === i || l.status === "done").length;
           const newPercent = Math.round((newDone / Math.max(1, totalCount)) * 100);
+          const stageBadges: string[] = ["Ingested"];
+          if (data.audioTranscribed) stageBadges.push("Audio fallback");
+          if (typeof data.partsProcessed === "number" && data.partsProcessed > 1) {
+            stageBadges.push(`${data.partsProcessed} parts`);
+          }
+          if (data.contextWarning) stageBadges.push("Sparse PDF warning");
 
           currentSession = {
             ...currentSession,
             completedCount: newDone,
             progressPercent: newPercent,
-            currentStage: `✓ Completed ${item.title}`,
+            currentStage: `✓ Completed ${item.title}${data.audioTranscribed ? " (Audio fallback)" : ""}`,
             updatedAt: new Date().toISOString(),
             lectures: currentSession.lectures.map((l, idx) =>
               idx === i
@@ -282,8 +345,11 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
                     ...l,
                     status: "done",
                     progressPercent: 100,
-                    progressStage: "Ingested",
-                    insightsCount: data.insightsCount || 0
+                    progressStage: stageBadges.join(" • "),
+                    insightsCount: data.insightsCount || 0,
+                    audioTranscribed: Boolean(data.audioTranscribed),
+                    partsProcessed: data.partsProcessed,
+                    contextWarning: data.contextWarning
                   }
                 : l
             )
@@ -293,6 +359,10 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
 
           // Broadcast update so open views can refresh notes list
           notifySubscribers(data.noteId);
+
+          if (requireAi) {
+            await new Promise((r) => setTimeout(r, 1500));
+          }
         } else {
           currentSession = {
             ...currentSession,
@@ -359,7 +429,7 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
   };
 
   // 2. Queue Engine for Audio Downloads
-  const runDownloadLoop = async (initialSession: IngestSession) => {
+  const runDownloadLoop = async (initialSession: IngestSession, chainToDistill: boolean = false) => {
     setIsRunning(true);
     setIsPaused(false);
     isPausedRef.current = false;
@@ -514,16 +584,26 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
 
       currentSession = {
         ...currentSession,
-        status: isAllDone ? "completed" : "paused",
-        phase: "idle",
-        progressPercent: isAllDone ? 100 : currentSession.progressPercent,
-        currentStage: isAllDone
+        status: chainToDistill ? "running" : isAllDone ? "completed" : "paused",
+        phase: chainToDistill ? "distilling" : "idle",
+        progressPercent: chainToDistill ? 0 : isAllDone ? 100 : currentSession.progressPercent,
+        currentStage: chainToDistill
+          ? "Audio downloads ready — switching to Batch Distillation..."
+          : isAllDone
           ? `✓ All ${totalCount} lecture audio file(s) downloaded!`
           : `Download stopped (${finalDone}/${totalCount} ready).`,
         updatedAt: new Date().toISOString()
       };
       setSession(currentSession);
       saveSessionToStorage(currentSession);
+
+      if (chainToDistill) {
+        await runDistillationLoop({
+          ...currentSession,
+          completedCount: currentSession.lectures.filter((l) => l.status === "done").length
+        });
+        return;
+      }
     }
 
     setIsRunning(false);
@@ -537,15 +617,15 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
     aiSettings?: any,
     echoAudioOnly: boolean = true
   ) => {
-    // Resolve & normalize AI settings (defaults to Antigravity in Local Studio when unset)
+    // Resolve & normalize Batch AI settings (defaults to gemini-4-hydrogen thinkingLevel=low when API key configured)
     let resolvedAiSettings = aiSettings;
     if (resolvedAiSettings) {
       if (resolvedAiSettings.apiKey === undefined && resolvedAiSettings.model === undefined) {
-        resolvedAiSettings = normalizeAiPayload(resolvedAiSettings);
+        resolvedAiSettings = normalizeBatchAiPayload(resolvedAiSettings);
       }
     } else if (typeof window !== "undefined") {
       try {
-        resolvedAiSettings = normalizeAiPayload(loadClientAiSettings());
+        resolvedAiSettings = normalizeBatchAiPayload(loadClientAiSettings());
       } catch {}
     }
 
@@ -576,6 +656,54 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
     setInterruptedSession(null);
 
     runDistillationLoop(newSession);
+  };
+
+  // Download missing .m4a audio streams first, then run batch distillation
+  const startPullThenDistill = async (
+    courseId: string,
+    lectures: IngestLectureItem[],
+    requireAi: boolean,
+    aiSettings?: any,
+    echoAudioOnly: boolean = true
+  ) => {
+    let resolvedAiSettings = aiSettings;
+    if (resolvedAiSettings) {
+      if (resolvedAiSettings.apiKey === undefined && resolvedAiSettings.model === undefined) {
+        resolvedAiSettings = normalizeBatchAiPayload(resolvedAiSettings);
+      }
+    } else if (typeof window !== "undefined") {
+      try {
+        resolvedAiSettings = normalizeBatchAiPayload(loadClientAiSettings());
+      } catch {}
+    }
+
+    const selected = lectures.filter((l) => l.selected);
+    const newSession: IngestSession = {
+      id: `pull_distill_${courseId}_${Date.now()}`,
+      courseId,
+      startedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      lectures,
+      requireAi,
+      aiSettings: resolvedAiSettings,
+      echoAudioOnly,
+      phase: "downloading",
+      status: "running",
+      currentLectureIndex: 1,
+      currentLectureTitle: selected[0]?.title || "",
+      currentStage: "Step 1/2: Pulling audio streams before batch distillation...",
+      progressPercent: 0,
+      completedCount: lectures.filter((l) => l.status === "done").length,
+      totalCount: selected.length,
+      errorCount: 0
+    };
+
+    setSession(newSession);
+    saveSessionToStorage(newSession);
+    setHasIncompleteSession(false);
+    setInterruptedSession(null);
+
+    runDownloadLoop(newSession, true);
   };
 
   // Start Batch Download
@@ -716,6 +844,7 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
         setDockOpen,
         startBatchDownload,
         startDistillationQueue,
+        startPullThenDistill,
         pauseQueue,
         resumeQueue,
         cancelQueue,

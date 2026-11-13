@@ -25,20 +25,24 @@ interface SettingsModalProps {
 
 const DEFAULT_SETTINGS: AISettings = {
   provider: "gemini",
-  antigravityModel: "gemini-4-hydrogen-medium",
+  antigravityModel: "gemini-4-hydrogen-high",
   geminiKey: "",
-  geminiModel: "gemini-2.5-flash",
+  geminiModel: "gemini-4-hydrogen",
   openaiKey: "",
   openaiModel: "gpt-4o-mini",
   anthropicKey: "",
   anthropicModel: "claude-3-5-sonnet-20241022",
   ollamaUrl: "http://localhost:11434",
-  ollamaModel: "llama3"
+  ollamaModel: "llama3",
+  useBatchEngine: true,
+  batchProvider: "gemini",
+  batchModel: "gemini-4-hydrogen",
+  batchThinkingLevel: "low"
 };
 
 const DEFAULT_ANTIGRAVITY_PRESETS = [
-  { id: "gemini-4-hydrogen-medium", label: "Gemini 4 Hydrogen Medium" },
   { id: "gemini-4-hydrogen-high", label: "Gemini 4 Hydrogen High" },
+  { id: "gemini-4-hydrogen-medium", label: "Gemini 4 Hydrogen Medium" },
   { id: "gemini-4-hydrogen-low", label: "Gemini 4 Hydrogen Low" },
   { id: "gemini-4-argon-medium", label: "Gemini 4 Argon Medium" },
   { id: "gemini-3.8-flash-medium", label: "Gemini 3.8 Flash Medium" },
@@ -48,12 +52,12 @@ const DEFAULT_ANTIGRAVITY_PRESETS = [
 ];
 
 const DEFAULT_GEMINI_PRESETS = [
-  { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", badge: "Recommended", desc: "Latest high-speed multimodal model" },
-  { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash", badge: "Fast", desc: "Next-generation low-latency engine" },
-  { id: "gemini-2.0-flash-lite", name: "Gemini 2.0 Flash Lite", badge: "Ultra Fast", desc: "Highest throughput, economical" },
-  { id: "gemini-1.5-flash-latest", name: "Gemini 1.5 Flash", badge: "Stable", desc: "Proven 1.5 architecture" },
-  { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", badge: "Deep Reasoning", desc: "Complex mathematical proofs & derivations" },
-  { id: "gemini-1.5-pro", name: "Gemini 1.5 Pro", badge: "Long Context", desc: "Exhaustive lecture analysis" }
+  { id: "gemini-4-hydrogen", name: "Gemini 4 Hydrogen", badge: "Recommended", desc: "Flagship speed + thinkingLevel control (Low for batch)" },
+  { id: "gemini-4-argon", name: "Gemini 4 Argon", badge: "Deep Reasoning", desc: "High-rigor mathematical derivations" },
+  { id: "gemini-4-carbon", name: "Gemini 4 Carbon", badge: "Ultra Fast", desc: "High-throughput economical processing" },
+  { id: "gemini-3.8-flash", name: "Gemini 3.8 Flash", badge: "Fast Multimodal", desc: "Fast long-context lecture & audio model" },
+  { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", badge: "Legacy Flash", desc: "Previous generation multimodal model" },
+  { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", badge: "Legacy Pro", desc: "Previous generation deep reasoning" }
 ];
 
 const DEFAULT_OPENAI_PRESETS = [
@@ -534,7 +538,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       type="text"
                       value={settings.antigravityModel || ""}
                       onChange={(e) => setSettings({ ...settings, antigravityModel: e.target.value })}
-                      placeholder="e.g. gemini-4-hydrogen-medium"
+                      placeholder="e.g. gemini-4-hydrogen-high"
                       className="flex-1 rounded-xl bg-zinc-950 border border-zinc-800 px-3 py-2 text-xs font-mono text-zinc-200 placeholder:text-zinc-600 focus:outline-hidden focus:border-violet-500"
                     />
                     <button
@@ -548,7 +552,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 ) : (
                   <div className="space-y-1">
                     <select
-                      value={settings.antigravityModel || "gemini-4-hydrogen-medium"}
+                      value={settings.antigravityModel || "gemini-4-hydrogen-high"}
                       onChange={(e) => {
                         if (e.target.value === "__custom__") {
                           setCustomModelMode((prev) => ({ ...prev, antigravity: true }));
@@ -564,16 +568,16 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         </option>
                       ))}
                       {!availableAntigravityModels.some(
-                        (m) => m.id === (settings.antigravityModel || "gemini-4-hydrogen-medium")
+                        (m) => m.id === (settings.antigravityModel || "gemini-4-hydrogen-high")
                       ) && (
-                        <option value={settings.antigravityModel || "gemini-4-hydrogen-medium"}>
-                          {settings.antigravityModel || "gemini-4-hydrogen-medium"}
+                        <option value={settings.antigravityModel || "gemini-4-hydrogen-high"}>
+                          {settings.antigravityModel || "gemini-4-hydrogen-high"}
                         </option>
                       )}
                       <option value="__custom__">✍️ Enter Custom Model ID...</option>
                     </select>
                     <p className="text-[10px] text-zinc-500">
-                      Active: <code className="text-violet-400">{settings.antigravityModel || "gemini-4-hydrogen-medium"}</code>
+                      Active: <code className="text-violet-400">{settings.antigravityModel || "gemini-4-hydrogen-high"}</code>
                     </p>
                   </div>
                 )}
@@ -645,7 +649,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       type="text"
                       value={settings.geminiModel || ""}
                       onChange={(e) => setSettings({ ...settings, geminiModel: e.target.value })}
-                      placeholder="e.g. gemini-2.5-flash or gemini-2.5-pro"
+                      placeholder="e.g. gemini-4-hydrogen or gemini-4-argon"
                       className="flex-1 rounded-xl bg-zinc-950 border border-zinc-800 px-3 py-2 text-xs font-mono text-zinc-200 placeholder:text-zinc-600 focus:outline-hidden focus:border-indigo-500"
                     />
                     <button
@@ -659,7 +663,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 ) : (
                   <div className="space-y-1">
                     <select
-                      value={settings.geminiModel || "gemini-2.5-flash"}
+                      value={settings.geminiModel || "gemini-4-hydrogen"}
                       onChange={(e) => {
                         if (e.target.value === "__custom__") {
                           setCustomModelMode((prev) => ({ ...prev, gemini: true }));
@@ -680,7 +684,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       <option value="__custom__">✍️ Enter Custom Model Name...</option>
                     </select>
                     <p className="text-[10px] text-zinc-500">
-                      Active: <code className="text-indigo-400">{settings.geminiModel || "gemini-2.5-flash"}</code>
+                      Active: <code className="text-indigo-400">{settings.geminiModel || "gemini-4-hydrogen"}</code>
                     </p>
                   </div>
                 )}
@@ -954,6 +958,140 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               </div>
             </div>
           )}
+
+          {/* Batch Lecture Engine & Multimodal Audio Fallback Card */}
+          <div className="space-y-3 p-4 rounded-xl bg-zinc-900/60 border border-indigo-900/50">
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-0.5">
+                <div className="text-xs font-bold text-indigo-300 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Batch Lecture Engine &amp; .m4a Audio Fallback</span>
+                </div>
+                <p className="text-[11px] text-zinc-400 leading-relaxed">
+                  Offloads multi-hour Echo360 batch queues from workspace-aware Antigravity tokens onto an API engine while preserving full chronological Map-Reduce and course PDF grounding.
+                </p>
+              </div>
+              <label className="flex items-center gap-1.5 text-[11px] font-semibold text-zinc-200 cursor-pointer shrink-0 select-none">
+                <input
+                  type="checkbox"
+                  checked={settings.useBatchEngine ?? true}
+                  onChange={(e) => setSettings({ ...settings, useBatchEngine: e.target.checked })}
+                  className="rounded border-zinc-700 bg-zinc-950 text-indigo-500 focus:ring-indigo-500"
+                />
+                <span>Enabled</span>
+              </label>
+            </div>
+
+            {(settings.useBatchEngine ?? true) && (
+              <div className="space-y-3 pt-2 border-t border-zinc-800/80">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-zinc-300">Batch Provider</label>
+                    <select
+                      value={settings.batchProvider || "gemini"}
+                      onChange={(e) => {
+                        const bp = e.target.value as AISettings["batchProvider"];
+                        const defaultM =
+                          bp === "gemini"
+                            ? "gemini-4-hydrogen"
+                            : bp === "openai"
+                            ? settings.openaiModel || "gpt-4o-mini"
+                            : bp === "anthropic"
+                            ? settings.anthropicModel || "claude-3-5-sonnet-20241022"
+                            : settings.ollamaModel || "llama3";
+                        setSettings({ ...settings, batchProvider: bp, batchModel: defaultM });
+                      }}
+                      className="w-full rounded-xl bg-zinc-950 border border-zinc-800 px-2.5 py-2 text-xs text-zinc-200 focus:outline-hidden focus:border-indigo-500 cursor-pointer"
+                    >
+                      <option value="gemini">Google Gemini API (Recommended)</option>
+                      <option value="openai">OpenAI API</option>
+                      <option value="anthropic">Anthropic API</option>
+                      <option value="ollama">Local Ollama</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-zinc-300">Batch Model</label>
+                    {(settings.batchProvider || "gemini") === "gemini" ? (
+                      <select
+                        value={settings.batchModel || "gemini-4-hydrogen"}
+                        onChange={(e) => setSettings({ ...settings, batchModel: e.target.value })}
+                        className="w-full rounded-xl bg-zinc-950 border border-zinc-800 px-2.5 py-2 text-xs font-mono text-zinc-200 focus:outline-hidden focus:border-indigo-500 cursor-pointer"
+                      >
+                        {DEFAULT_GEMINI_PRESETS.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name} ({p.id})
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={settings.batchModel || ""}
+                        onChange={(e) => setSettings({ ...settings, batchModel: e.target.value })}
+                        placeholder="Model ID..."
+                        className="w-full rounded-xl bg-zinc-950 border border-zinc-800 px-2.5 py-2 text-xs font-mono text-zinc-200 focus:outline-hidden focus:border-indigo-500"
+                      />
+                    )}
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-zinc-300">Thinking Level</label>
+                    <select
+                      value={settings.batchThinkingLevel || "low"}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          batchThinkingLevel: e.target.value as AISettings["batchThinkingLevel"]
+                        })
+                      }
+                      disabled={(settings.batchProvider || "gemini") !== "gemini"}
+                      className="w-full rounded-xl bg-zinc-950 border border-zinc-800 px-2.5 py-2 text-xs text-zinc-200 focus:outline-hidden focus:border-indigo-500 cursor-pointer disabled:opacity-40"
+                    >
+                      <option value="low">low (Recommended)</option>
+                      <option value="minimal">minimal</option>
+                      <option value="medium">medium</option>
+                      <option value="high">high</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Gemini API Key input here too if primary provider is Antigravity so audio fallback & batch work seamlessly */}
+                {(settings.batchProvider === "gemini" || !settings.geminiKey?.trim()) && (
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-bold text-zinc-300">
+                        Gemini API Key (Powers Batch Engine + `.m4a` Audio Transcription Fallback)
+                      </label>
+                      <span
+                        className={`text-[10px] font-mono ${
+                          settings.geminiKey?.trim() ? "text-emerald-400" : "text-amber-400"
+                        }`}
+                      >
+                        {settings.geminiKey?.trim() ? "✓ Key configured" : "Required for API batch & audio"}
+                      </span>
+                    </div>
+                    <input
+                      type={showKey ? "text" : "password"}
+                      value={settings.geminiKey || ""}
+                      onChange={(e) => setSettings({ ...settings, geminiKey: e.target.value })}
+                      placeholder="AIzaSy... (falls back to primary Antigravity if blank)"
+                      className="w-full rounded-xl bg-zinc-950 border border-zinc-800 px-3 py-2 text-xs font-mono text-zinc-200 placeholder:text-zinc-600 focus:outline-hidden focus:border-indigo-500"
+                    />
+                  </div>
+                )}
+
+                <div className="text-[10px] text-zinc-400 bg-zinc-950/60 p-2.5 rounded-lg border border-zinc-800 space-y-1">
+                  <div>
+                    ✓ <strong>Workspace-Aware Primary</strong> (<code className="text-violet-300">antigravity / {settings.antigravityModel || "gemini-4-hydrogen-high"}</code>) stays reserved for Proof Auditing, Notebook Compilation &amp; Course Q&amp;A.
+                  </div>
+                  <div>
+                    ✓ If weekly PDF course materials are missing or sparse (<code className="text-amber-300">&lt; 300 chars</code>), Course Noting warns you upfront instead of silently raising thinking level to <code className="text-zinc-300">medium</code>.
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Test Status feedback */}
           {testResult && (
