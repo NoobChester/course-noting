@@ -5,13 +5,9 @@ import { exec } from "child_process";
 import { promisify } from "util";
 import matter from "gray-matter";
 import { fetchUNSWCourseOutline } from "../../courses/outline/route";
-import { resolveGeminiModel } from "@/lib/gemini-client";
-import {
-  DEFAULT_ANTIGRAVITY_MODEL,
-  LECTURE_DISTILLATION_JSON_SCHEMA,
-  resolveCourseWorkspaceDir,
-  runAntigravityPrompt
-} from "@/lib/antigravity-client";
+import { distillLongLecture } from "@/lib/lecture-ingest";
+import { transcribeAudioWithGemini } from "@/lib/gemini-audio";
+import { loadCourseMaterialContext } from "@/lib/material-extractor";
 
 const execAsync = promisify(exec);
 
@@ -353,36 +349,6 @@ ${lines.slice(0, 30).join("\n")}
   };
 }
 
-function extractJson(text: string): any {
-  let cleaned = text.trim();
-  if (cleaned.startsWith("```")) {
-    cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-  }
-  const firstBrace = cleaned.indexOf("{");
-  const lastBrace = cleaned.lastIndexOf("}");
-  if (firstBrace !== -1 && lastBrace !== -1) {
-    cleaned = cleaned.substring(firstBrace, lastBrace + 1);
-  }
-  return JSON.parse(cleaned);
-}
-
-function pruneTranscriptNoise(rawText: string): string {
-  const lines = (rawText || "").split("\n");
-  const cleaned: string[] = [];
-  let prevLine = "";
-
-  for (let line of lines) {
-    line = line.trim();
-    if (!line) continue;
-    if (line.includes("-->")) continue;
-    if (/^(WEBVTT|NOTE|STYLE|\d+)$/i.test(line)) continue;
-    if (line.toLowerCase() === prevLine.toLowerCase()) continue;
-    cleaned.push(line);
-    prevLine = line;
-  }
-  return cleaned.join("\n");
-}
-
 async function enrichLessonsWithDiskState(lessons: any[], cleanCourse: string): Promise<void> {
   const courseDir = path.join(COURSES_DIR, cleanCourse);
   const rawAudioDir = path.join(courseDir, "raw_files", "audio");
@@ -427,10 +393,16 @@ async function enrichLessonsWithDiskState(lessons: any[], cleanCourse: string): 
     } catch {}
 
     let hasTranscript = false;
+    let transcriptChars = 0;
     try {
       const stat = await fs.stat(transcriptFile);
-      if (stat.size > 0) hasTranscript = true;
+      if (stat.size > 0) {
+        hasTranscript = true;
+        transcriptChars = stat.size;
+      }
     } catch {}
+
+    l.transcriptChars = transcriptChars;
 
     if (noteExists) {
       l.status = "done";
@@ -445,6 +417,12 @@ async function enrichLessonsWithDiskState(lessons: any[], cleanCourse: string): 
       l.progressStage = "✓ Audio & transcript ready";
       l.hasTranscript = true;
       l.audioDownloaded = true;
+    } else if (hasAudio) {
+      l.status = "media_ready";
+      l.progressPercent = 100;
+      l.progressStage = "✓ Audio ready (Gemini transcription fallback)";
+      l.hasTranscript = false;
+      l.audioDownloaded = true;
     } else if (hasTranscript) {
       l.status = "queued";
       l.progressPercent = 25;
@@ -453,222 +431,6 @@ async function enrichLessonsWithDiskState(lessons: any[], cleanCourse: string): 
       l.audioDownloaded = false;
     }
   }
-}
-
-async function distillLectureWithAI(params: {
-  courseId: string;
-  week: number;
-  lectureTitle: string;
-  outlineTopic?: string;
-  outlineDescription?: string;
-  courseContext: string;
-  transcriptText: string;
-  aiSettings: {
-    provider: "antigravity" | "gemini" | "openai" | "anthropic" | "ollama";
-    apiKey?: string;
-    model?: string;
-    antigravityModel?: string;
-    geminiModel?: string;
-    openaiModel?: string;
-    anthropicModel?: string;
-    ollamaUrl?: string;
-    ollamaModel?: string;
-  };
-}): Promise<{
-  title: string;
-  outline: string[];
-  distilledContent: string;
-  insights: any[];
-  questionHints: any[];
-  aiModelUsed: string;
-}> {
-  const {
-    courseId,
-    week,
-    lectureTitle,
-    outlineTopic,
-    outlineDescription,
-    courseContext,
-    transcriptText,
-    aiSettings
-  } = params;
-
-  const prunedTranscript = pruneTranscriptNoise(transcriptText);
-
-  const systemPrompt = `You are an expert university mathematics teaching assistant and mathematical note extractor.
-Your job is to read raw lecture materials (spoken speech-to-text transcript + uploaded course materials like problem sheets, slides, and syllabus outline) and distill high-yield study notes formatted with LaTeX ($...$ inline, $$...$$ display).
-
-DO NOT output conversational commentary. Output strictly valid JSON matching this schema:
-{
-  "title": "Concise descriptive lecture title",
-  "outline": ["Topic 1", "Topic 2", "Topic 3"],
-  "distilledContent": "Comprehensive Markdown study note formatted with KaTeX ($...$). Include definitions, formulas, and proof sketches. Integrate concepts from both the lecture transcript and uploaded course materials.",
-  "insights": [
-    {
-      "type": "intuition",
-      "title": "Title of intuition or analogy",
-      "timestamp": "hh:mm:ss if mentioned or empty",
-      "content": "KaTeX explanation of the spoken mental model or visual picture"
-    },
-    {
-      "type": "exam_warning",
-      "title": "Title of warning",
-      "timestamp": "hh:mm:ss if mentioned or empty",
-      "content": "What mistake or trap the lecturer warned students about on exams"
-    }
-  ],
-  "questionHints": [
-    {
-      "questionId": "week-${week}",
-      "timestamp": "hh:mm:ss",
-      "hint": "Spoken heuristic or problem-solving hint mentioned during the lecture"
-    }
-  ]
-}`;
-
-  const userPrompt = `Course: ${courseId.toUpperCase()} (Week ${week})
-Lecture Candidate: ${lectureTitle}${outlineTopic ? ` — Outline Topic: ${outlineTopic}` : ""}
-${outlineDescription ? `Syllabus Schedule Note: ${outlineDescription}` : ""}
-
---- UPLOADED COURSE MATERIALS CONTEXT (Slides, Problem Sheets, Notes) ---
-${courseContext ? courseContext.slice(0, 15000) : "(No extra uploaded materials for this week)"}
-
---- SPOKEN TRANSCRIPT (PRUNED) ---
-${prunedTranscript ? prunedTranscript.slice(0, 25000) : "(No spoken transcript recorded)"}
-
-Distill the high-yield study note JSON now:`;
-
-  const provider = aiSettings.provider || "gemini";
-  let parsedResult: any = null;
-  let modelName = "";
-
-  if (provider === "antigravity") {
-    const targetModel = aiSettings.antigravityModel || aiSettings.model || DEFAULT_ANTIGRAVITY_MODEL;
-    const workspaceDir = await resolveCourseWorkspaceDir(courseId, BASE_DIR);
-    const agyRes = await runAntigravityPrompt<any>({
-      prompt: userPrompt,
-      systemInstruction: systemPrompt,
-      model: targetModel,
-      workspaceDir,
-      schema: LECTURE_DISTILLATION_JSON_SCHEMA,
-      timeoutMs: 240000
-    });
-    modelName = `Antigravity (${agyRes.model})`;
-    parsedResult = agyRes.parsed;
-  } else if (provider === "gemini") {
-    const key = aiSettings.apiKey || process.env.GEMINI_API_KEY;
-    if (!key) throw new Error("Missing Google Gemini API key. Please configure your key in AI Settings.");
-
-    const targetModel = await resolveGeminiModel(key, aiSettings.geminiModel || aiSettings.model);
-    modelName = `Google Gemini (${targetModel})`;
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${key}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
-          generationConfig: {
-            temperature: 0.2,
-            responseMimeType: "application/json"
-          }
-        })
-      }
-    );
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error?.message || `Gemini API returned status ${res.status}`);
-    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
-    parsedResult = extractJson(rawText);
-  } else if (provider === "openai") {
-    const key = aiSettings.apiKey || process.env.OPENAI_API_KEY;
-    if (!key) throw new Error("Missing OpenAI API key.");
-    const targetModel = aiSettings.openaiModel || aiSettings.model || "gpt-4o-mini";
-    modelName = `OpenAI (${targetModel})`;
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${key}`
-      },
-      body: JSON.stringify({
-        model: targetModel,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt }
-        ],
-        response_format: { type: "json_object" },
-        temperature: 0.2
-      })
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error?.message || `OpenAI API failed for model ${targetModel}`);
-    const rawText = data.choices?.[0]?.message?.content || "{}";
-    parsedResult = extractJson(rawText);
-  } else if (provider === "anthropic") {
-    const key = aiSettings.apiKey || process.env.ANTHROPIC_API_KEY;
-    if (!key) throw new Error("Missing Anthropic API key.");
-    const targetModel = aiSettings.anthropicModel || aiSettings.model || "claude-3-5-sonnet-20241022";
-    modelName = `Claude (${targetModel})`;
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": key,
-        "anthropic-version": "2023-06-01"
-      },
-      body: JSON.stringify({
-        model: targetModel,
-        max_tokens: 3000,
-        system: systemPrompt,
-        messages: [{ role: "user", content: userPrompt }]
-      })
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error?.message || `Anthropic API failed for model ${targetModel}`);
-    const rawText = data.content?.[0]?.text || "{}";
-    parsedResult = extractJson(rawText);
-  } else if (provider === "ollama") {
-    const ollamaUrl = aiSettings.ollamaUrl || "http://localhost:11434";
-    const targetModel = aiSettings.ollamaModel || aiSettings.model || "qwen2.5:7b-instruct";
-    modelName = `Ollama (${targetModel})`;
-    const res = await fetch(`${ollamaUrl}/api/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: targetModel,
-        format: "json",
-        stream: false,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt }
-        ]
-      })
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || `Ollama API failed for model ${targetModel}`);
-    const rawText = data.message?.content || "{}";
-    parsedResult = extractJson(rawText);
-  } else {
-    throw new Error(`Unsupported AI provider: ${provider}`);
-  }
-
-  const topicHeading = outlineTopic ? `${lectureTitle} — ${outlineTopic}` : (parsedResult.title || lectureTitle);
-  const outlineCallout = outlineDescription
-    ? `> [!NOTE] 🎯 Official UNSW Course Outline — Week ${week}: ${outlineTopic || lectureTitle}\n> ${outlineDescription}\n\n`
-    : "";
-
-  const courseContextCallout = courseContext && courseContext.trim().length > 0
-    ? `> [!TIP] 📚 Uploaded Course Context Integrated\n> Distilled using staged course slides, problem sheets, and spoken transcript.\n\n`
-    : "";
-
-  return {
-    title: topicHeading,
-    outline: parsedResult.outline || [topicHeading],
-    distilledContent: `${outlineCallout}${courseContextCallout}${parsedResult.distilledContent || ""}`,
-    insights: Array.isArray(parsedResult.insights) ? parsedResult.insights : [],
-    questionHints: Array.isArray(parsedResult.questionHints) ? parsedResult.questionHints : [],
-    aiModelUsed: modelName
-  };
 }
 
 export interface VaultSessionItem {
@@ -1548,23 +1310,14 @@ export async function POST(req: NextRequest) {
       }
 
       // Phase: "distill-note" or "all"
-      // Read course content manifest for uploaded slides, problem sheets, notes
-      let courseContext = "";
-      try {
-        const manifestRaw = await fs.readFile(path.join(courseDir, "course_content.json"), "utf-8");
-        const manifest = JSON.parse(manifestRaw);
-        const matchingItems = (manifest.items || []).filter(
-          (item: any) => item.week === Number(week) || item.week === "all" || !item.week
-        );
-        courseContext = matchingItems
-          .map((m: any) => `[${m.categoryName || m.category} - ${m.originalName}]: ${m.textSnippet || ""}`)
-          .join("\n\n");
-      } catch {}
+      const materialCtx = await loadCourseMaterialContext(courseDir, Number(week) || 1, 12000);
+      const courseContext = materialCtx.text;
 
       const { aiSettings, requireAi = true } = body;
 
       let synthesized: any = null;
       let aiModelUsed: string | null = null;
+      let audioTranscribed = false;
 
       const hasAiConfigured = aiSettings && (
         aiSettings.provider === "antigravity" ||
@@ -1576,13 +1329,34 @@ export async function POST(req: NextRequest) {
 
       if (hasAiConfigured) {
         try {
-          const aiResult = await distillLectureWithAI({
+          // Multimodal Gemini audio fallback if Echo360 had 0 VTT cues but .m4a audio was downloaded
+          if (!transcriptText.trim() && audioDownloaded) {
+            const geminiAudioKey =
+              aiSettings.geminiFallbackKey ||
+              (aiSettings.provider === "gemini" ? aiSettings.apiKey : undefined) ||
+              process.env.GEMINI_API_KEY;
+            const transcribed = await transcribeAudioWithGemini({
+              audioPath: audioOutPath,
+              apiKey: geminiAudioKey || "",
+              model: aiSettings.provider === "gemini" ? aiSettings.geminiModel || aiSettings.model : undefined,
+              lectureTitle: title || `Lecture (Week ${week})`,
+              week: Number(week) || 1,
+              courseContext
+            });
+            transcriptText = transcribed.transcriptText;
+            cueCount = transcribed.cueCount;
+            audioTranscribed = true;
+            await fs.writeFile(transcriptOutPath, transcriptText, "utf-8");
+          }
+
+          const aiResult = await distillLongLecture({
             courseId: cleanCourse,
+            courseDir,
+            mediaId: safeMediaId,
             week: Number(week) || 1,
             lectureTitle: title || `Lecture (Week ${week})`,
             outlineTopic,
             outlineDescription,
-            courseContext,
             transcriptText,
             aiSettings
           });
@@ -1633,6 +1407,9 @@ export async function POST(req: NextRequest) {
         questionHints: synthesized.questionHints || [],
         aiDistilled: Boolean(aiModelUsed),
         aiModel: aiModelUsed || "None (Raw Transcript Outline)",
+        audioTranscribed: audioTranscribed || undefined,
+        partsProcessed: synthesized.partsProcessed || undefined,
+        contextWarning: synthesized.contextWarning || undefined,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
@@ -1654,6 +1431,9 @@ export async function POST(req: NextRequest) {
         week: frontmatter.week,
         cueCount,
         audioDownloaded,
+        audioTranscribed,
+        partsProcessed: synthesized.partsProcessed || 1,
+        contextWarning: synthesized.contextWarning,
         aiDistilled: Boolean(aiModelUsed),
         aiModel: aiModelUsed,
         insightsCount: synthesized.insights.length,
