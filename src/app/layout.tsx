@@ -7,12 +7,12 @@ import { SmartResumeBanner } from "@/components/layout/SmartResumeBanner";
 import { FloatingIngestDock } from "@/components/layout/FloatingIngestDock";
 
 export const metadata: Metadata = {
-  title: "Course Noting — Blank Slate Study Hub",
-  description: "Interactive problem solver, concept library, lecture insights overlay, and revision cheat sheets.",
+  title: "Course Noting — Lecture Ingestion Studio",
+  description: "Pre-AI Echo360 lecture downloader, course material extractor, and raw media inspector."
 };
 
 export default function RootLayout({
-  children,
+  children
 }: {
   children: React.ReactNode;
 }) {

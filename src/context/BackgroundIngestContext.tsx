@@ -8,36 +8,33 @@ import React, {
   useRef,
   useCallback
 } from "react";
-import { loadClientAiSettings, normalizeBatchAiPayload } from "@/lib/ai-settings";
 
 export interface IngestLectureItem {
   lessonId: string;
   mediaId: string;
+  sectionId?: string;
+  streamUrl?: string;
+  groupName?: string;
   title: string;
   week: number;
   date: string;
   lessonUrl: string;
   hasVideo: boolean;
   selected: boolean;
-  status: "queued" | "pulling" | "media_ready" | "distilling" | "done" | "error";
+  status: "queued" | "pulling" | "media_ready" | "error";
   error?: string;
-  insightsCount?: number;
-  audioTranscribed?: boolean;
-  partsProcessed?: number;
-  contextWarning?: string;
+  audioWarning?: string;
   outlineTopic?: string;
   outlineDescription?: string;
   outlineDateRange?: string;
   transcriptStatus?: "idle" | "loading" | "ready" | "none" | "error";
   transcriptCueCount?: number;
+  transcriptChars?: number;
   transcriptPreview?: string;
   progressPercent?: number;
   progressStage?: string;
   ffmpegAvailable?: boolean;
   needsMedia?: boolean;
-  allowPdfOnly?: boolean;
-  pdfOnly?: boolean;
-  checkpointCount?: number;
   hasTranscript?: boolean;
   audioDownloaded?: boolean;
 }
@@ -49,10 +46,8 @@ export interface IngestSession {
   startedAt: string;
   updatedAt: string;
   lectures: IngestLectureItem[];
-  requireAi: boolean;
-  aiSettings?: any;
   echoAudioOnly: boolean;
-  phase: "downloading" | "distilling" | "idle";
+  phase: "downloading" | "idle";
   status: "idle" | "running" | "paused" | "completed" | "error";
   currentLectureTitle?: string;
   currentLectureIndex: number;
@@ -77,20 +72,6 @@ interface BackgroundIngestContextType {
     lectures: IngestLectureItem[],
     echoAudioOnly?: boolean
   ) => Promise<void>;
-  startDistillationQueue: (
-    courseId: string,
-    lectures: IngestLectureItem[],
-    requireAi: boolean,
-    aiSettings?: any,
-    echoAudioOnly?: boolean
-  ) => Promise<void>;
-  startPullThenDistill: (
-    courseId: string,
-    lectures: IngestLectureItem[],
-    requireAi: boolean,
-    aiSettings?: any,
-    echoAudioOnly?: boolean
-  ) => Promise<void>;
   pauseQueue: () => void;
   resumeQueue: () => void;
   cancelQueue: () => void;
@@ -98,7 +79,7 @@ interface BackgroundIngestContextType {
   dismissInterruptedSession: () => void;
   clearSession: () => void;
   retryFailedItems: () => Promise<void>;
-  subscribeToNoteUpdates: (callback: (noteId?: string) => void) => () => void;
+  subscribeToMediaUpdates: (callback: (mediaId?: string) => void) => () => void;
 }
 
 const STORAGE_KEY = "cn_active_ingest_session";
@@ -113,19 +94,16 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
   const [interruptedSession, setInterruptedSession] = useState<IngestSession | null>(null);
   const [dockOpen, setDockOpen] = useState(false);
 
-  // Control refs for background loop
   const isPausedRef = useRef(false);
   const isCancelledRef = useRef(false);
   const resumeResolverRef = useRef<(() => void) | null>(null);
   const sessionRef = useRef<IngestSession | null>(null);
-  const subscribersRef = useRef<Set<(noteId?: string) => void>>(new Set());
+  const subscribersRef = useRef<Set<(mediaId?: string) => void>>(new Set());
 
-  // Keep sessionRef in sync with session state
   useEffect(() => {
     sessionRef.current = session;
   }, [session]);
 
-  // Save session to localStorage
   const saveSessionToStorage = useCallback((sess: IngestSession | null) => {
     if (typeof window === "undefined") return;
     try {
@@ -135,60 +113,79 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
         localStorage.removeItem(STORAGE_KEY);
       }
     } catch (e) {
-      console.error("Failed to sync session with localStorage", e);
+      console.error("Failed to sync ingest session with localStorage", e);
     }
   }, []);
 
-  // Subscribe to lecture note completions
-  const subscribeToNoteUpdates = useCallback((callback: (noteId?: string) => void) => {
+  const subscribeToMediaUpdates = useCallback((callback: (mediaId?: string) => void) => {
     subscribersRef.current.add(callback);
     return () => {
       subscribersRef.current.delete(callback);
     };
   }, []);
 
-  const notifySubscribers = useCallback((noteId?: string) => {
+  const notifySubscribers = useCallback((mediaId?: string) => {
     subscribersRef.current.forEach((cb) => {
       try {
-        cb(noteId);
+        cb(mediaId);
       } catch (e) {
-        console.error("Error in note update subscriber callback", e);
+        console.error("Error in media update subscriber callback", e);
       }
     });
   }, []);
 
-  // Check localStorage on initial mount for interrupted or recent sessions
+  // Hydrate interrupted download sessions on mount; ignore legacy non-download sessions
   useEffect(() => {
     if (typeof window === "undefined") return;
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed: IngestSession = JSON.parse(stored);
-        if (parsed && Array.isArray(parsed.lectures) && parsed.lectures.length > 0) {
-          const completed = parsed.lectures.filter((l) => l.status === "done").length;
-          const selected = parsed.lectures.filter((l) => l.selected);
-          const remaining = selected.filter((l) => l.status !== "done").length;
+    const timer = setTimeout(() => {
+      try {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (!stored) return;
+        const parsed = JSON.parse(stored) as IngestSession & { phase?: string };
+        if (!parsed || !Array.isArray(parsed.lectures) || parsed.lectures.length === 0) return;
 
-          if (remaining > 0 && parsed.status !== "completed") {
-            // An uncompleted session was interrupted!
-            setHasIncompleteSession(true);
-            setInterruptedSession(parsed);
-            setSession({
-              ...parsed,
-              status: "paused"
-            });
-          } else if (parsed.status === "completed") {
-            // Completed session within recent time
-            setSession(parsed);
-          }
+        if (parsed.phase !== "downloading" && parsed.status !== "completed") {
+          localStorage.removeItem(STORAGE_KEY);
+          return;
         }
+
+        const normalizedLectures: IngestLectureItem[] = parsed.lectures.map((l) => {
+          const rawStatus = l.status as string;
+          const safeStatus: IngestLectureItem["status"] =
+            rawStatus === "done" || rawStatus === "media_ready"
+              ? "media_ready"
+              : rawStatus === "error"
+              ? "error"
+              : "queued";
+          return { ...l, status: safeStatus };
+        });
+
+        const normalizedSession: IngestSession = {
+          ...parsed,
+          phase: parsed.status === "completed" ? "idle" : "downloading",
+          lectures: normalizedLectures
+        };
+
+        const selected = normalizedLectures.filter((l) => l.selected);
+        const remaining = selected.filter((l) => l.status !== "media_ready").length;
+
+        if (remaining > 0 && normalizedSession.status !== "completed" && normalizedSession.phase === "downloading") {
+          setHasIncompleteSession(true);
+          setInterruptedSession(normalizedSession);
+          setSession({
+            ...normalizedSession,
+            status: "paused"
+          });
+        } else if (normalizedSession.status === "completed") {
+          setSession(normalizedSession);
+        }
+      } catch (e) {
+        console.error("Failed to parse stored ingest session", e);
       }
-    } catch (e) {
-      console.error("Failed to parse stored ingest session", e);
-    }
+    }, 0);
+    return () => clearTimeout(timer);
   }, []);
 
-  // Helper: wait while paused
   const checkWaitWhilePaused = async () => {
     if (!isPausedRef.current) return;
     await new Promise<void>((resolve) => {
@@ -196,258 +193,7 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
     });
   };
 
-  // 1. Queue Engine for Distillation
-  const runDistillationLoop = async (initialSession: IngestSession) => {
-    setIsRunning(true);
-    setIsPaused(false);
-    isPausedRef.current = false;
-    isCancelledRef.current = false;
-    setDockOpen(true);
-
-    let currentSession = { ...initialSession };
-    const { courseId, requireAi, aiSettings, echoAudioOnly } = currentSession;
-    const selectedLectures = currentSession.lectures.filter((l) => l.selected);
-    const totalCount = selectedLectures.length;
-
-    for (let i = 0; i < currentSession.lectures.length; i++) {
-      if (isCancelledRef.current) {
-        break;
-      }
-
-      await checkWaitWhilePaused();
-      if (isCancelledRef.current) break;
-
-      const item = currentSession.lectures[i];
-      if (!item.selected || item.status === "done") {
-        continue;
-      }
-
-      // Update current lecture status to distilling
-      const currentDone = currentSession.lectures.filter((l) => l.status === "done").length;
-      const progressPercent = Math.round((currentDone / Math.max(1, totalCount)) * 100);
-
-      currentSession = {
-        ...currentSession,
-        status: "running",
-        phase: "distilling",
-        currentLectureIndex: i + 1,
-        currentLectureTitle: item.title,
-        currentStage: requireAi
-          ? `Distilling ${item.title} with AI & course context...`
-          : `Writing notes for ${item.title}...`,
-        progressPercent,
-        updatedAt: new Date().toISOString(),
-        lectures: currentSession.lectures.map((l, idx) =>
-          idx === i
-            ? {
-                ...l,
-                status: "distilling",
-                progressPercent: 30,
-                progressStage: requireAi
-                  ? "Distilling with course context & KaTeX..."
-                  : "Writing transcript notes..."
-              }
-            : l
-        )
-      };
-      setSession(currentSession);
-      saveSessionToStorage(currentSession);
-
-      try {
-        const ephemeralCookie = typeof window !== "undefined" ? sessionStorage.getItem("cn_echo_session_cookie") : null;
-        const ephemeralUrl = typeof window !== "undefined" ? sessionStorage.getItem("cn_echo_session_url") : null;
-        const headers: Record<string, string> = { "Content-Type": "application/json" };
-        if (ephemeralCookie) headers["x-echo-cookie"] = ephemeralCookie;
-        if (ephemeralUrl) headers["x-echo-section-url"] = ephemeralUrl;
-
-        const retryDelaysMs = [8000, 20000, 35000];
-        let res: Response | null = null;
-        let data: any = null;
-        let lastErr: any = null;
-
-        for (let attempt = 0; attempt <= retryDelaysMs.length; attempt++) {
-          if (isCancelledRef.current) break;
-          await checkWaitWhilePaused();
-          if (isCancelledRef.current) break;
-
-          try {
-            res = await fetch("/api/lectures/echo360", {
-              method: "POST",
-              headers,
-              body: JSON.stringify({
-                action: "auto-ingest",
-                phase: "distill-note",
-                courseId,
-                lessonId: item.lessonId,
-                mediaId: item.mediaId,
-                title: item.title,
-                week: item.week,
-                date: item.date,
-                lessonUrl: item.lessonUrl,
-                downloadAudio: echoAudioOnly,
-                autoDistill: requireAi,
-                requireAi,
-                outlineTopic: item.outlineTopic,
-                outlineDescription: item.outlineDescription,
-                allowPdfOnly: Boolean(item.allowPdfOnly),
-                cookieHeader: ephemeralCookie || undefined,
-                aiSettings
-              })
-            });
-            data = await res.json();
-
-            if (res.status === 422 || data?.needsMedia) {
-              break;
-            }
-
-            const transientHttp = res.status === 429 || res.status === 502 || res.status === 503 || res.status === 504;
-            const transientMsg =
-              typeof data?.error === "string" && /429|rate limit|quota|timeout|temporarily/i.test(data.error);
-
-            if (res.ok || (!transientHttp && !transientMsg) || attempt === retryDelaysMs.length) {
-              break;
-            }
-          } catch (fetchErr: any) {
-            lastErr = fetchErr;
-            if (attempt === retryDelaysMs.length) {
-              throw fetchErr;
-            }
-          }
-
-          const delay = retryDelaysMs[attempt] ?? 20000;
-          currentSession = {
-            ...currentSession,
-            currentStage: `Rate-limited or busy on ${item.title} — retrying in ${Math.round(delay / 1000)}s...`,
-            updatedAt: new Date().toISOString(),
-            lectures: currentSession.lectures.map((l, idx) =>
-              idx === i
-                ? {
-                    ...l,
-                    progressStage: `Retrying (${attempt + 1}/${retryDelaysMs.length}) after ${Math.round(delay / 1000)}s...`
-                  }
-                : l
-            )
-          };
-          setSession(currentSession);
-          saveSessionToStorage(currentSession);
-          await new Promise((r) => setTimeout(r, delay));
-        }
-
-        if (isCancelledRef.current) break;
-        if (!res) throw lastErr || new Error("No response from server");
-
-        if (res.ok) {
-          const newDone = currentSession.lectures.filter((l, idx) => idx === i || l.status === "done").length;
-          const newPercent = Math.round((newDone / Math.max(1, totalCount)) * 100);
-          const stageBadges: string[] = ["Ingested"];
-          if (data.audioTranscribed) stageBadges.push("Audio fallback");
-          if (typeof data.partsProcessed === "number" && data.partsProcessed > 1) {
-            stageBadges.push(`${data.partsProcessed} parts`);
-          }
-          if (data.contextWarning) stageBadges.push("Sparse PDF warning");
-
-          currentSession = {
-            ...currentSession,
-            completedCount: newDone,
-            progressPercent: newPercent,
-            currentStage: `✓ Completed ${item.title}${data.audioTranscribed ? " (Audio fallback)" : ""}`,
-            updatedAt: new Date().toISOString(),
-            lectures: currentSession.lectures.map((l, idx) =>
-              idx === i
-                ? {
-                    ...l,
-                    status: "done",
-                    progressPercent: 100,
-                    progressStage: stageBadges.join(" • "),
-                    insightsCount: data.insightsCount || 0,
-                    audioTranscribed: Boolean(data.audioTranscribed),
-                    partsProcessed: data.partsProcessed,
-                    contextWarning: data.contextWarning
-                  }
-                : l
-            )
-          };
-          setSession(currentSession);
-          saveSessionToStorage(currentSession);
-
-          // Broadcast update so open views can refresh notes list
-          notifySubscribers(data.noteId);
-
-          if (requireAi) {
-            await new Promise((r) => setTimeout(r, 1500));
-          }
-        } else {
-          const errMsg = data.error || "Distillation failed";
-          currentSession = {
-            ...currentSession,
-            errorCount: currentSession.errorCount + 1,
-            lastError: errMsg,
-            currentStage: `⚠️ Error on ${item.title}: ${errMsg}`,
-            updatedAt: new Date().toISOString(),
-            lectures: currentSession.lectures.map((l, idx) =>
-              idx === i
-                ? {
-                    ...l,
-                    status: "error",
-                    error: errMsg,
-                    needsMedia: Boolean(data?.needsMedia),
-                    progressPercent: 0,
-                    progressStage: errMsg
-                  }
-                : l
-            )
-          };
-          setSession(currentSession);
-          saveSessionToStorage(currentSession);
-        }
-      } catch (err: any) {
-        const netErr = err.message || "Network error";
-        currentSession = {
-          ...currentSession,
-          errorCount: currentSession.errorCount + 1,
-          lastError: netErr,
-          currentStage: `⚠️ Network error on ${item.title}`,
-          updatedAt: new Date().toISOString(),
-          lectures: currentSession.lectures.map((l, idx) =>
-            idx === i
-              ? {
-                  ...l,
-                  status: "error",
-                  error: netErr,
-                  progressPercent: 0,
-                  progressStage: netErr
-                }
-              : l
-          )
-        };
-        setSession(currentSession);
-        saveSessionToStorage(currentSession);
-      }
-    }
-
-    if (!isCancelledRef.current) {
-      const finalDone = currentSession.lectures.filter((l) => l.status === "done").length;
-      const isAllDone = finalDone >= totalCount;
-
-      currentSession = {
-        ...currentSession,
-        status: isAllDone ? "completed" : "paused",
-        phase: "idle",
-        progressPercent: isAllDone ? 100 : currentSession.progressPercent,
-        currentStage: isAllDone
-          ? `🎉 All ${totalCount} lecture(s) successfully distilled!`
-          : `Distillation ended (${finalDone}/${totalCount} finished).`,
-        updatedAt: new Date().toISOString()
-      };
-      setSession(currentSession);
-      saveSessionToStorage(currentSession);
-    }
-
-    setIsRunning(false);
-  };
-
-  // 2. Queue Engine for Audio Downloads
-  const runDownloadLoop = async (initialSession: IngestSession, chainToDistill: boolean = false) => {
+  const runDownloadLoop = async (initialSession: IngestSession) => {
     setIsRunning(true);
     setIsPaused(false);
     isPausedRef.current = false;
@@ -465,13 +211,11 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
       if (isCancelledRef.current) break;
 
       const item = currentSession.lectures[i];
-      if (!item.selected || item.status === "done" || item.status === "media_ready") {
+      if (!item.selected || item.status === "media_ready") {
         continue;
       }
 
-      const currentDone = currentSession.lectures.filter(
-        (l) => l.status === "media_ready" || l.status === "done"
-      ).length;
+      const currentDone = currentSession.lectures.filter((l) => l.selected && l.status === "media_ready").length;
       const progressPercent = Math.round((currentDone / Math.max(1, totalCount)) * 100);
 
       currentSession = {
@@ -480,7 +224,9 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
         phase: "downloading",
         currentLectureIndex: i + 1,
         currentLectureTitle: item.title,
-        currentStage: `Downloading audio for ${item.title}...`,
+        currentStage: echoAudioOnly
+          ? `Pulling transcript & .m4a audio for ${item.title}...`
+          : `Pulling transcript for ${item.title}...`,
         progressPercent,
         updatedAt: new Date().toISOString(),
         lectures: currentSession.lectures.map((l, idx) =>
@@ -489,7 +235,9 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
                 ...l,
                 status: "pulling",
                 progressPercent: 35,
-                progressStage: "Streaming .m4a audio stream via FFmpeg..."
+                progressStage: echoAudioOnly
+                  ? "Fetching transcript & streaming .m4a audio..."
+                  : "Fetching Echo360 transcript..."
               }
             : l
         )
@@ -513,6 +261,8 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
             courseId,
             lessonId: item.lessonId,
             mediaId: item.mediaId,
+            sectionId: item.sectionId,
+            streamUrl: item.streamUrl,
             title: item.title,
             week: item.week,
             date: item.date,
@@ -528,12 +278,12 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
         if (res.ok && data.mediaReady === false) {
           const warnMsg =
             data.warning ||
-            "0 Echo360 VTT cues & audio unavailable — drop .m4a or .vtt in Stage 2 or enable PDF-Only override";
+            "0 Echo360 VTT cues & audio unavailable — drop .m4a or .vtt manually";
           currentSession = {
             ...currentSession,
             errorCount: currentSession.errorCount + 1,
             lastError: warnMsg,
-            currentStage: `⚠️ No media for ${item.title}: ${warnMsg}`,
+            currentStage: `No media for ${item.title}: ${warnMsg}`,
             updatedAt: new Date().toISOString(),
             lectures: currentSession.lectures.map((l, idx) =>
               idx === i
@@ -556,14 +306,15 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
           saveSessionToStorage(currentSession);
         } else if (res.ok) {
           const newDone = currentSession.lectures.filter(
-            (l, idx) => idx === i || l.status === "media_ready" || l.status === "done"
+            (l, idx) => l.selected && (idx === i || l.status === "media_ready")
           ).length;
           const newPercent = Math.round((newDone / Math.max(1, totalCount)) * 100);
-          const readyLabel = data.audioDownloaded && data.cueCount > 0
-            ? `✓ Transcript (${data.cueCount} cues) + Audio ready`
-            : data.cueCount > 0
-            ? `✓ Transcript (${data.cueCount} cues) ready`
-            : "✓ Audio ready";
+          const readyLabel =
+            data.audioDownloaded && data.cueCount > 0
+              ? `Transcript (${data.cueCount} cues) + .m4a ready`
+              : data.cueCount > 0
+              ? `Transcript (${data.cueCount} cues) ready`
+              : "Audio .m4a ready";
 
           currentSession = {
             ...currentSession,
@@ -577,6 +328,7 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
                     ...l,
                     status: "media_ready",
                     error: undefined,
+                    audioWarning: data.warning,
                     needsMedia: false,
                     hasTranscript: Boolean(data.hasTranscript || data.cueCount > 0),
                     audioDownloaded: Boolean(data.audioDownloaded),
@@ -590,13 +342,14 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
           };
           setSession(currentSession);
           saveSessionToStorage(currentSession);
+          notifySubscribers(data.resolvedMediaId || item.mediaId || item.lessonId);
         } else {
           const dlErr = data.error || "Media download failed";
           currentSession = {
             ...currentSession,
             errorCount: currentSession.errorCount + 1,
             lastError: dlErr,
-            currentStage: `⚠️ Download error on ${item.title}`,
+            currentStage: `Download error on ${item.title}`,
             updatedAt: new Date().toISOString(),
             lectures: currentSession.lectures.map((l, idx) =>
               idx === i
@@ -613,13 +366,13 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
           setSession(currentSession);
           saveSessionToStorage(currentSession);
         }
-      } catch (err: any) {
-        const netErr = err.message || "Network error";
+      } catch (err: unknown) {
+        const netErr = err instanceof Error ? err.message : "Network error";
         currentSession = {
           ...currentSession,
           errorCount: currentSession.errorCount + 1,
           lastError: netErr,
-          currentStage: `⚠️ Network error downloading ${item.title}`,
+          currentStage: `Network error downloading ${item.title}`,
           updatedAt: new Date().toISOString(),
           lectures: currentSession.lectures.map((l, idx) =>
             idx === i
@@ -639,136 +392,26 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
     }
 
     if (!isCancelledRef.current) {
-      const finalDone = currentSession.lectures.filter(
-        (l) => l.status === "media_ready" || l.status === "done"
-      ).length;
+      const finalDone = currentSession.lectures.filter((l) => l.selected && l.status === "media_ready").length;
       const isAllDone = finalDone >= totalCount;
 
       currentSession = {
         ...currentSession,
-        status: chainToDistill ? "running" : isAllDone ? "completed" : "paused",
-        phase: chainToDistill ? "distilling" : "idle",
-        progressPercent: chainToDistill ? 0 : isAllDone ? 100 : currentSession.progressPercent,
-        currentStage: chainToDistill
-          ? "Audio downloads ready — switching to Batch Distillation..."
-          : isAllDone
-          ? `✓ All ${totalCount} lecture audio file(s) downloaded!`
-          : `Download stopped (${finalDone}/${totalCount} ready).`,
+        status: isAllDone ? "completed" : "paused",
+        phase: "idle",
+        progressPercent: isAllDone ? 100 : currentSession.progressPercent,
+        currentStage: isAllDone
+          ? `All ${totalCount} lecture media item(s) downloaded!`
+          : `Download paused (${finalDone}/${totalCount} ready).`,
         updatedAt: new Date().toISOString()
       };
       setSession(currentSession);
       saveSessionToStorage(currentSession);
-
-      if (chainToDistill) {
-        await runDistillationLoop({
-          ...currentSession,
-          completedCount: currentSession.lectures.filter((l) => l.status === "done").length
-        });
-        return;
-      }
     }
 
     setIsRunning(false);
   };
 
-  // Start Batch Distillation
-  const startDistillationQueue = async (
-    courseId: string,
-    lectures: IngestLectureItem[],
-    requireAi: boolean,
-    aiSettings?: any,
-    echoAudioOnly: boolean = true
-  ) => {
-    // Resolve & normalize Batch AI settings (defaults to gemini-4-hydrogen thinkingLevel=low when API key configured)
-    let resolvedAiSettings = aiSettings;
-    if (resolvedAiSettings) {
-      if (resolvedAiSettings.apiKey === undefined && resolvedAiSettings.model === undefined) {
-        resolvedAiSettings = normalizeBatchAiPayload(resolvedAiSettings);
-      }
-    } else if (typeof window !== "undefined") {
-      try {
-        resolvedAiSettings = normalizeBatchAiPayload(loadClientAiSettings());
-      } catch {}
-    }
-
-    const selected = lectures.filter((l) => l.selected);
-    const newSession: IngestSession = {
-      id: `session_${courseId}_${Date.now()}`,
-      courseId,
-      startedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      lectures,
-      requireAi,
-      aiSettings: resolvedAiSettings,
-      echoAudioOnly,
-      phase: "distilling",
-      status: "running",
-      currentLectureIndex: 1,
-      currentLectureTitle: selected[0]?.title || "",
-      currentStage: "Initializing background distillation...",
-      progressPercent: 0,
-      completedCount: lectures.filter((l) => l.status === "done").length,
-      totalCount: selected.length,
-      errorCount: 0
-    };
-
-    setSession(newSession);
-    saveSessionToStorage(newSession);
-    setHasIncompleteSession(false);
-    setInterruptedSession(null);
-
-    runDistillationLoop(newSession);
-  };
-
-  // Download missing .m4a audio streams first, then run batch distillation
-  const startPullThenDistill = async (
-    courseId: string,
-    lectures: IngestLectureItem[],
-    requireAi: boolean,
-    aiSettings?: any,
-    echoAudioOnly: boolean = true
-  ) => {
-    let resolvedAiSettings = aiSettings;
-    if (resolvedAiSettings) {
-      if (resolvedAiSettings.apiKey === undefined && resolvedAiSettings.model === undefined) {
-        resolvedAiSettings = normalizeBatchAiPayload(resolvedAiSettings);
-      }
-    } else if (typeof window !== "undefined") {
-      try {
-        resolvedAiSettings = normalizeBatchAiPayload(loadClientAiSettings());
-      } catch {}
-    }
-
-    const selected = lectures.filter((l) => l.selected);
-    const newSession: IngestSession = {
-      id: `pull_distill_${courseId}_${Date.now()}`,
-      courseId,
-      startedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      lectures,
-      requireAi,
-      aiSettings: resolvedAiSettings,
-      echoAudioOnly,
-      phase: "downloading",
-      status: "running",
-      currentLectureIndex: 1,
-      currentLectureTitle: selected[0]?.title || "",
-      currentStage: "Step 1/2: Pulling audio streams before batch distillation...",
-      progressPercent: 0,
-      completedCount: lectures.filter((l) => l.status === "done").length,
-      totalCount: selected.length,
-      errorCount: 0
-    };
-
-    setSession(newSession);
-    saveSessionToStorage(newSession);
-    setHasIncompleteSession(false);
-    setInterruptedSession(null);
-
-    runDownloadLoop(newSession, true);
-  };
-
-  // Start Batch Download
   const startBatchDownload = async (
     courseId: string,
     lectures: IngestLectureItem[],
@@ -781,7 +424,6 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
       startedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       lectures,
-      requireAi: false,
       echoAudioOnly,
       phase: "downloading",
       status: "running",
@@ -789,7 +431,7 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
       currentLectureTitle: selected[0]?.title || "",
       currentStage: "Starting media downloads...",
       progressPercent: 0,
-      completedCount: lectures.filter((l) => l.status === "media_ready" || l.status === "done").length,
+      completedCount: selected.filter((l) => l.status === "media_ready").length,
       totalCount: selected.length,
       errorCount: 0
     };
@@ -799,10 +441,9 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
     setHasIncompleteSession(false);
     setInterruptedSession(null);
 
-    runDownloadLoop(newSession);
+    await runDownloadLoop(newSession);
   };
 
-  // Pause
   const pauseQueue = () => {
     isPausedRef.current = true;
     setIsPaused(true);
@@ -817,7 +458,6 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
     }
   };
 
-  // Resume active paused queue
   const resumeQueue = () => {
     isPausedRef.current = false;
     setIsPaused(false);
@@ -829,14 +469,13 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
       const updated: IngestSession = {
         ...sessionRef.current,
         status: "running",
-        currentStage: "Resuming..."
+        currentStage: "Resuming media downloads..."
       };
       setSession(updated);
       saveSessionToStorage(updated);
     }
   };
 
-  // Cancel
   const cancelQueue = () => {
     isCancelledRef.current = true;
     isPausedRef.current = false;
@@ -850,6 +489,7 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
       const updated: IngestSession = {
         ...sessionRef.current,
         status: "idle",
+        phase: "idle",
         currentStage: "Cancelled"
       };
       setSession(updated);
@@ -857,26 +497,21 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
     }
   };
 
-  // Resume Interrupted Session (from tab close or refresh)
   const resumeInterruptedSession = async () => {
     if (!interruptedSession) return;
     setHasIncompleteSession(false);
-    const targetSession = {
+    const targetSession: IngestSession = {
       ...interruptedSession,
-      status: "running" as const
+      phase: "downloading",
+      status: "running"
     };
     setSession(targetSession);
     saveSessionToStorage(targetSession);
     setInterruptedSession(null);
 
-    if (targetSession.phase === "downloading") {
-      runDownloadLoop(targetSession);
-    } else {
-      runDistillationLoop(targetSession);
-    }
+    await runDownloadLoop(targetSession);
   };
 
-  // Dismiss Interrupted Session
   const dismissInterruptedSession = () => {
     setHasIncompleteSession(false);
     setInterruptedSession(null);
@@ -884,7 +519,6 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
     setSession(null);
   };
 
-  // Retry only failed items in the current session without resetting completed items
   const retryFailedItems = async () => {
     const active = sessionRef.current || interruptedSession;
     if (!active || isRunning) return;
@@ -905,24 +539,14 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
         : l
     );
 
-    const shouldDownload =
-      active.phase === "downloading" ||
-      (active.phase === "idle" &&
-        (active.id.startsWith("download_") ||
-          active.lectures.some((l) => l.status === "error" && l.needsMedia) ||
-          (!active.lectures.some((l) => l.status === "done") &&
-            active.lectures.some((l) => l.status === "media_ready"))));
-
     const retrySession: IngestSession = {
       ...active,
-      phase: shouldDownload ? "downloading" : "distilling",
+      phase: "downloading",
       status: "running",
       errorCount: 0,
       lastError: undefined,
       updatedAt: new Date().toISOString(),
-      currentStage: shouldDownload
-        ? "Retrying failed Stage 2 media downloads..."
-        : "Retrying failed Stage 3 distillations...",
+      currentStage: "Retrying failed media downloads...",
       lectures: resetLectures
     };
 
@@ -931,14 +555,9 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
     setHasIncompleteSession(false);
     setInterruptedSession(null);
 
-    if (shouldDownload) {
-      await runDownloadLoop(retrySession, active.id.startsWith("pull_distill_"));
-    } else {
-      await runDistillationLoop(retrySession);
-    }
+    await runDownloadLoop(retrySession);
   };
 
-  // Clear Session
   const clearSession = () => {
     cancelQueue();
     setSession(null);
@@ -959,8 +578,6 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
         dockOpen,
         setDockOpen,
         startBatchDownload,
-        startDistillationQueue,
-        startPullThenDistill,
         pauseQueue,
         resumeQueue,
         cancelQueue,
@@ -968,7 +585,7 @@ export function BackgroundIngestProvider({ children }: { children: React.ReactNo
         dismissInterruptedSession,
         clearSession,
         retryFailedItems,
-        subscribeToNoteUpdates
+        subscribeToMediaUpdates
       }}
     >
       {children}

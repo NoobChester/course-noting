@@ -1182,15 +1182,16 @@ export default function LecturesPage() {
       const rawLectures = Array.isArray(data.lectures) ? data.lectures : [];
       const mapped = rawLectures.map((l: any) => ({
         ...l,
-        selected: l.status === "done" && !l.pdfOnly ? false : true,
+        sectionId: l.sectionId || data.sectionId || undefined,
+        selected: l.hasVideo === false ? false : l.status === "done" && !l.pdfOnly ? false : true,
         status: (l.status || "queued") as IngestLectureItem["status"],
         transcriptStatus: (l.transcriptStatus ||
-          (l.hasTranscript ? "ready" : "loading")) as IngestLectureItem["transcriptStatus"]
+          (l.hasTranscript ? "ready" : l.hasVideo === false ? "none" : "loading")) as IngestLectureItem["transcriptStatus"]
       }));
       setDiscoveredLectures(mapped);
 
-      // Automatically pull transcripts in the background for items not already cached on disk
-      const needQuickTranscript = mapped.filter((l: any) => !l.hasTranscript);
+      // Automatically pull transcripts in the background for items with recordings not already cached on disk
+      const needQuickTranscript = mapped.filter((l: any) => !l.hasTranscript && l.hasVideo !== false);
       if (needQuickTranscript.length > 0) {
         fetchTranscriptsInBackground(needQuickTranscript);
       }

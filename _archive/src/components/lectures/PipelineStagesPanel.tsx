@@ -242,6 +242,11 @@ export function PipelineStagesPanel({
                 return {
                   ...l,
                   ...disk,
+                  hasVideo: l.hasVideo ?? disk.hasVideo,
+                  streamUrl: l.streamUrl ?? disk.streamUrl,
+                  sectionId: l.sectionId ?? disk.sectionId,
+                  groupName: l.groupName ?? disk.groupName,
+                  audioWarning: disk.audioDownloaded ? undefined : l.audioWarning,
                   status: keepActive
                     ? l.status
                     : l.status === "error" && !disk.hasTranscript && !disk.audioDownloaded
@@ -434,7 +439,7 @@ export function PipelineStagesPanel({
     if (!courseId) return;
     const queueList = discoveredLectures.map((l) => ({
       ...l,
-      selected: !l.hasTranscript && !l.audioDownloaded
+      selected: l.hasVideo !== false && !l.hasTranscript && !l.audioDownloaded
     }));
     const count = queueList.filter((l) => l.selected).length;
     if (count === 0) return;
@@ -448,7 +453,8 @@ export function PipelineStagesPanel({
       ...l,
       selected: l.lessonId === item.lessonId,
       status: l.lessonId === item.lessonId ? ("queued" as const) : l.status,
-      error: l.lessonId === item.lessonId ? undefined : l.error
+      error: l.lessonId === item.lessonId ? undefined : l.error,
+      audioWarning: l.lessonId === item.lessonId ? undefined : l.audioWarning
     }));
     await startBatchDownload(courseId, singleQueue, true);
   };
@@ -526,7 +532,7 @@ export function PipelineStagesPanel({
     (l) => l.hasTranscript || l.audioDownloaded
   ).length;
   const missingMediaCount = discoveredLectures.filter(
-    (l) => !l.hasTranscript && !l.audioDownloaded
+    (l) => l.hasVideo !== false && !l.hasTranscript && !l.audioDownloaded
   ).length;
   const failedLecturesCount = discoveredLectures.filter(
     (l) => l.status === "error"
@@ -1106,6 +1112,11 @@ export function PipelineStagesPanel({
                         <span className="px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-700 text-[10px] font-mono text-zinc-300">
                           W{l.week}
                         </span>
+                        {l.groupName && !l.title.toLowerCase().includes(l.groupName.toLowerCase()) && (
+                          <span className="px-1.5 py-0.5 rounded bg-zinc-900/70 border border-zinc-800 text-[10px] text-zinc-400">
+                            {l.groupName}
+                          </span>
+                        )}
                         <span className="font-semibold text-xs text-zinc-100 truncate">
                           {l.title}
                         </span>
@@ -1118,17 +1129,30 @@ export function PipelineStagesPanel({
 
                       {/* Stage status pills */}
                       <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-mono">
-                        {l.hasTranscript ? (
+                        {l.hasTranscript && (
                           <span className="px-2 py-0.5 rounded-md bg-emerald-950/60 border border-emerald-500/30 text-emerald-300">
                             Transcript: {l.transcriptCueCount || "Ready"} cues
                           </span>
-                        ) : l.audioDownloaded ? (
+                        )}
+                        {l.audioDownloaded && (
                           <span className="px-2 py-0.5 rounded-md bg-cyan-950/60 border border-cyan-500/30 text-cyan-300">
                             Audio .m4a Ready
                           </span>
-                        ) : (
-                          <span className="px-2 py-0.5 rounded-md bg-amber-950/60 border border-amber-500/40 text-amber-300">
-                            Needs Transcript or Audio
+                        )}
+                        {!l.hasTranscript && !l.audioDownloaded && (
+                          l.hasVideo === false ? (
+                            <span className="px-2 py-0.5 rounded-md bg-zinc-900 border border-zinc-700 text-zinc-400">
+                              No recording
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-md bg-amber-950/60 border border-amber-500/40 text-amber-300">
+                              Needs Transcript or Audio
+                            </span>
+                          )
+                        )}
+                        {l.hasTranscript && !l.audioDownloaded && l.audioWarning && (
+                          <span className="px-2 py-0.5 rounded-md bg-amber-950/70 border border-amber-500/40 text-amber-300 font-semibold">
+                            ⚠ Audio skipped
                           </span>
                         )}
 
@@ -1185,14 +1209,14 @@ export function PipelineStagesPanel({
                         />
                       </label>
 
-                      {!hasMedia && (
+                      {l.hasVideo !== false && (!hasMedia || (l.hasTranscript && !l.audioDownloaded && ffmpegAvailable !== false)) && (
                         <button
                           type="button"
                           onClick={() => handlePullSingleMedia(l)}
                           disabled={isRunning}
                           className="px-2.5 py-1.5 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/30 disabled:opacity-50 border border-cyan-500/40 text-cyan-200 text-[11px] font-semibold transition cursor-pointer"
                         >
-                          Pull Media
+                          {!hasMedia ? "Pull Media" : "Pull .m4a"}
                         </button>
                       )}
 
@@ -1231,6 +1255,13 @@ export function PipelineStagesPanel({
                       </button>
                     </div>
                   </div>
+
+                  {l.hasTranscript && !l.audioDownloaded && l.audioWarning && (
+                    <div className="flex items-start gap-1.5 text-[11px] text-amber-200 bg-amber-950/35 border border-amber-500/35 rounded-lg px-2.5 py-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-400" />
+                      <span className="break-words">Audio skipped: {l.audioWarning}</span>
+                    </div>
+                  )}
 
                   {isError && (l.error || l.progressStage) && (
                     <div className="flex items-start gap-1.5 text-[11px] text-rose-300 bg-rose-950/40 border border-rose-500/30 rounded-lg px-2.5 py-1.5">
